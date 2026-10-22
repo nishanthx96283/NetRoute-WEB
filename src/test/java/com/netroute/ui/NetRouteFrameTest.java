@@ -2,6 +2,7 @@ package com.netroute.ui;
 
 import com.netroute.graph.GraphManager;
 import com.netroute.graph.Network;
+import com.netroute.model.NodeType;
 import com.netroute.model.Route;
 import com.netroute.routing.DijkstraRouter;
 import com.netroute.simulation.SimulationEngine;
@@ -71,6 +72,7 @@ class NetRouteFrameTest {
 
         NetRouteFrame frame = new NetRouteFrame();
         assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
 
         // Test route calculation callback
         frame.onFindRoute("PC1", "S1");
@@ -87,6 +89,70 @@ class NetRouteFrameTest {
 
         // Test reset
         frame.onResetNetwork();
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameHandlesRandomizeLinkCostsCallback() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        frame.onFindRoute("PC1", "S1");
+        frame.onRandomizeLinkCosts();
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameHandlesDynamicNodeAndLinkCreation() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        // Add dynamic node PC4
+        frame.onAddNode(NodeType.COMPUTER);
+
+        // Connect PC4 to R1
+        frame.onConnectNodes("PC4", "R1", 2.5);
+
+        // Calculate route from newly added node
+        frame.onFindRoute("PC4", "S1");
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameHandlesNodeAndLinkDeletion() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        // Find initial route
+        frame.onFindRoute("PC1", "S1");
+
+        // Delete link L5 (R1-S1), should recalculate route via R2
+        frame.onDeleteLink("L5");
+
+        // Delete node PC1, should clear route and endpoints
+        frame.onDeleteNode("PC1");
+
+        // Attempting to delete non-existent node or link should log error without throwing
+        frame.onDeleteNode("NONEXISTENT");
+        frame.onDeleteLink("NONEXISTENT");
 
         frame.dispose();
     }

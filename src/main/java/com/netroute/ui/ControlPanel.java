@@ -2,7 +2,7 @@ package com.netroute.ui;
 
 import com.netroute.graph.Network;
 import com.netroute.model.NetworkLink;
-import com.netroute.model.NetworkNode;
+import com.netroute.model.NodeType;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -10,7 +10,9 @@ import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -22,7 +24,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Control panel for routing, packet simulation, and link failure management.
+ * Control panel for routing, packet simulation, link failure management,
+ * link cost randomization, and dynamic network management (add/delete nodes and links).
  */
 public class ControlPanel extends JPanel {
 
@@ -33,11 +36,23 @@ public class ControlPanel extends JPanel {
         void onFailLink(String linkId);
         void onRestoreLink(String linkId);
         void onResetNetwork();
+        void onRandomizeLinkCosts();
+        void onAddNode(NodeType type);
+        void onConnectNodes(String sourceId, String destinationId, double cost);
+        void onDeleteNode(String nodeId);
+        void onDeleteLink(String linkId);
     }
 
     private final JComboBox<String> cmbSource = new JComboBox<>();
     private final JComboBox<String> cmbDestination = new JComboBox<>();
     private final JComboBox<String> cmbLinks = new JComboBox<>();
+
+    // Dynamic Network Management components
+    private final JComboBox<NodeType> cmbNodeType = new JComboBox<>(NodeType.values());
+    private final JComboBox<String> cmbConnectNodeA = new JComboBox<>();
+    private final JComboBox<String> cmbConnectNodeB = new JComboBox<>();
+    private final JTextField txtLinkCost = new JTextField("2.0", 5);
+    private final JComboBox<String> cmbDeleteNode = new JComboBox<>();
 
     private final JLabel lblRouteResult = new JLabel("No route calculated yet.");
     private Listener listener;
@@ -48,11 +63,20 @@ public class ControlPanel extends JPanel {
 
         add(createRoutingPanel());
         add(createLinkControlPanel());
+        add(createNetworkManagementPanel());
         add(createSimulationActionPanel());
     }
 
     public void setListener(Listener listener) {
         this.listener = listener;
+    }
+
+    public String getSelectedSource() {
+        return (String) cmbSource.getSelectedItem();
+    }
+
+    public String getSelectedDestination() {
+        return (String) cmbDestination.getSelectedItem();
     }
 
     /**
@@ -66,18 +90,47 @@ public class ControlPanel extends JPanel {
         List<String> nodeIds = new ArrayList<>(network.getNodes().keySet());
         Collections.sort(nodeIds);
 
-        DefaultComboBoxModel<String> srcModel = new DefaultComboBoxModel<>(nodeIds.toArray(new String[0]));
-        DefaultComboBoxModel<String> dstModel = new DefaultComboBoxModel<>(nodeIds.toArray(new String[0]));
+        String prevSrc = (String) cmbSource.getSelectedItem();
+        String prevDst = (String) cmbDestination.getSelectedItem();
+        String prevNodeA = (String) cmbConnectNodeA.getSelectedItem();
+        String prevNodeB = (String) cmbConnectNodeB.getSelectedItem();
+        String prevDelete = (String) cmbDeleteNode.getSelectedItem();
 
-        cmbSource.setModel(srcModel);
-        cmbDestination.setModel(dstModel);
+        cmbSource.setModel(new DefaultComboBoxModel<>(nodeIds.toArray(new String[0])));
+        cmbDestination.setModel(new DefaultComboBoxModel<>(nodeIds.toArray(new String[0])));
+        cmbConnectNodeA.setModel(new DefaultComboBoxModel<>(nodeIds.toArray(new String[0])));
+        cmbConnectNodeB.setModel(new DefaultComboBoxModel<>(nodeIds.toArray(new String[0])));
+        cmbDeleteNode.setModel(new DefaultComboBoxModel<>(nodeIds.toArray(new String[0])));
 
-        // Default: PC1 -> S1 if available
-        if (nodeIds.contains("PC1")) {
+        // Restore or default selections
+        if (prevSrc != null && nodeIds.contains(prevSrc)) {
+            cmbSource.setSelectedItem(prevSrc);
+        } else if (nodeIds.contains("PC1")) {
             cmbSource.setSelectedItem("PC1");
         }
-        if (nodeIds.contains("S1")) {
+
+        if (prevDst != null && nodeIds.contains(prevDst)) {
+            cmbDestination.setSelectedItem(prevDst);
+        } else if (nodeIds.contains("S1")) {
             cmbDestination.setSelectedItem("S1");
+        }
+
+        if (prevNodeA != null && nodeIds.contains(prevNodeA)) {
+            cmbConnectNodeA.setSelectedItem(prevNodeA);
+        } else if (!nodeIds.isEmpty()) {
+            cmbConnectNodeA.setSelectedIndex(0);
+        }
+
+        if (prevNodeB != null && nodeIds.contains(prevNodeB)) {
+            cmbConnectNodeB.setSelectedItem(prevNodeB);
+        } else if (nodeIds.size() > 1) {
+            cmbConnectNodeB.setSelectedIndex(1);
+        }
+
+        if (prevDelete != null && nodeIds.contains(prevDelete)) {
+            cmbDeleteNode.setSelectedItem(prevDelete);
+        } else if (!nodeIds.isEmpty()) {
+            cmbDeleteNode.setSelectedIndex(0);
         }
 
         populateLinks(network);
@@ -94,7 +147,8 @@ public class ControlPanel extends JPanel {
         for (String id : linkIds) {
             NetworkLink link = network.getLink(id);
             String status = link.isActive() ? "ACTIVE" : "FAILED";
-            linkDescriptions.add(id + " (" + link.getSourceId() + " - " + link.getDestinationId() + ") [" + status + "]");
+            linkDescriptions.add(id + " (" + link.getSourceId() + " - " + link.getDestinationId()
+                    + ") [cost: " + formatCost(link.getCost()) + "] [" + status + "]");
         }
 
         int prevSelected = cmbLinks.getSelectedIndex();
@@ -156,7 +210,7 @@ public class ControlPanel extends JPanel {
     private JPanel createLinkControlPanel() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Link Failure & Reroute Simulation"),
+                BorderFactory.createTitledBorder("Link Control & Randomization"),
                 BorderFactory.createEmptyBorder(6, 8, 6, 8)
         ));
 
@@ -164,14 +218,21 @@ public class ControlPanel extends JPanel {
         linkSelectPanel.add(new JLabel("Select Link:"), BorderLayout.WEST);
         linkSelectPanel.add(cmbLinks, BorderLayout.CENTER);
 
-        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 4));
-        JButton btnFail = new JButton("Simulate Link Failure");
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 4));
+        JButton btnFail = new JButton("Fail Link");
         JButton btnRestore = new JButton("Restore Link");
+        JButton btnDeleteLink = new JButton("Delete Link");
+        JButton btnRandomize = new JButton("Randomize Link Costs");
+
         btnFail.setForeground(new Color(180, 40, 50));
         btnRestore.setForeground(new Color(30, 130, 60));
+        btnDeleteLink.setForeground(new Color(180, 40, 50));
+        btnRandomize.setForeground(new Color(40, 70, 160));
 
         btnRow.add(btnFail);
         btnRow.add(btnRestore);
+        btnRow.add(btnDeleteLink);
+        btnRow.add(btnRandomize);
 
         btnFail.addActionListener(e -> {
             String selected = (String) cmbLinks.getSelectedItem();
@@ -189,16 +250,126 @@ public class ControlPanel extends JPanel {
             }
         });
 
+        btnDeleteLink.addActionListener(e -> {
+            String selected = (String) cmbLinks.getSelectedItem();
+            if (selected == null || selected.isBlank()) {
+                JOptionPane.showMessageDialog(this, "No link selected for deletion.", "Selection Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (listener != null) {
+                String linkId = extractLinkId(selected);
+                listener.onDeleteLink(linkId);
+            }
+        });
+
+        btnRandomize.addActionListener(e -> {
+            if (listener != null) {
+                listener.onRandomizeLinkCosts();
+            }
+        });
+
         panel.add(linkSelectPanel, BorderLayout.NORTH);
         panel.add(btnRow, BorderLayout.CENTER);
         return panel;
     }
 
+    private JPanel createNetworkManagementPanel() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Dynamic Network Management"),
+                BorderFactory.createEmptyBorder(4, 8, 6, 8)
+        ));
+
+        // Row 1: Add Node controls
+        JPanel nodeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        nodeRow.add(new JLabel("New Node Type:"));
+        nodeRow.add(cmbNodeType);
+        JButton btnAddNode = new JButton("Add Node");
+        nodeRow.add(btnAddNode);
+
+        btnAddNode.addActionListener(e -> {
+            NodeType type = (NodeType) cmbNodeType.getSelectedItem();
+            if (listener != null && type != null) {
+                listener.onAddNode(type);
+            }
+        });
+
+        // Row 2: Connect Nodes controls
+        JPanel connectGrid = new JPanel(new GridLayout(2, 2, 6, 4));
+        connectGrid.add(new JLabel("Node A:"));
+        connectGrid.add(cmbConnectNodeA);
+        connectGrid.add(new JLabel("Node B:"));
+        connectGrid.add(cmbConnectNodeB);
+
+        JPanel costRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        costRow.add(new JLabel("Link Cost:"));
+        costRow.add(txtLinkCost);
+        JButton btnConnect = new JButton("Connect Nodes");
+        btnConnect.setFont(new Font("SansSerif", Font.BOLD, 12));
+        costRow.add(btnConnect);
+
+        btnConnect.addActionListener(e -> {
+            String nodeA = (String) cmbConnectNodeA.getSelectedItem();
+            String nodeB = (String) cmbConnectNodeB.getSelectedItem();
+            if (nodeA == null || nodeB == null) {
+                JOptionPane.showMessageDialog(this, "Please select both nodes to connect.", "Validation Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (nodeA.equals(nodeB)) {
+                JOptionPane.showMessageDialog(this, "Self-loops are not allowed. Please select two different nodes.", "Validation Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            double cost;
+            try {
+                cost = Double.parseDouble(txtLinkCost.getText().trim());
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(this, "Please enter a valid numeric cost.", "Validation Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            if (Double.isNaN(cost) || Double.isInfinite(cost) || cost <= 0.0) {
+                JOptionPane.showMessageDialog(this, "Link cost must be a finite positive number (> 0).", "Validation Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            if (listener != null) {
+                listener.onConnectNodes(nodeA, nodeB, cost);
+            }
+        });
+
+        // Row 3: Delete Node controls
+        JPanel deleteNodeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+        deleteNodeRow.add(new JLabel("Delete Node:"));
+        deleteNodeRow.add(cmbDeleteNode);
+        JButton btnDeleteNode = new JButton("Delete Node");
+        btnDeleteNode.setForeground(new Color(180, 40, 50));
+        deleteNodeRow.add(btnDeleteNode);
+
+        btnDeleteNode.addActionListener(e -> {
+            String selected = (String) cmbDeleteNode.getSelectedItem();
+            if (selected == null || selected.isBlank()) {
+                JOptionPane.showMessageDialog(this, "No node selected for deletion.", "Selection Error", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            if (listener != null) {
+                listener.onDeleteNode(selected);
+            }
+        });
+
+        panel.add(nodeRow);
+        panel.add(connectGrid);
+        panel.add(costRow);
+        panel.add(deleteNodeRow);
+        return panel;
+    }
+
     private JPanel createSimulationActionPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 6));
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 4));
         panel.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createTitledBorder("Simulation Controls"),
-                BorderFactory.createEmptyBorder(4, 8, 4, 8)
+                BorderFactory.createEmptyBorder(2, 8, 4, 8)
         ));
 
         JButton btnStep = new JButton("Step 1 Tick");
@@ -227,5 +398,12 @@ public class ControlPanel extends JPanel {
             return text.substring(0, spaceIndex).trim();
         }
         return text.trim();
+    }
+
+    private static String formatCost(double cost) {
+        if (cost == (long) cost) {
+            return String.valueOf((long) cost);
+        }
+        return String.format("%.1f", cost);
     }
 }

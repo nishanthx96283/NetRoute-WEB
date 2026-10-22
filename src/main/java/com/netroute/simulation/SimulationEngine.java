@@ -87,6 +87,10 @@ public final class SimulationEngine {
         return queues.computeIfAbsent(linkId, PacketQueue::new);
     }
 
+    public boolean hasQueueFor(String linkId) {
+        return queues.containsKey(linkId);
+    }
+
     public int getSentCount() {
         return sentCount;
     }
@@ -162,6 +166,82 @@ public final class SimulationEngine {
     }
 
     /**
+     * Removes all state and queues for a link from the simulation engine.
+     * Drains any packets waiting in the link's queue, cancels in-flight transmissions,
+     * and reroutes (or drops) any affected live packets.
+     */
+    public void removeLink(String linkId) {
+        if (linkId == null || linkId.isBlank()) {
+            return;
+        }
+        String id = linkId.trim();
+        network.findLink(id).ifPresent(l -> l.setActive(false));
+
+        // 1. Drain and remove queue
+        PacketQueue queue = queues.remove(id);
+        if (queue != null) {
+            for (Packet packet : queue.drain()) {
+                if (!packet.isTerminal()) {
+                    rerouteOrDrop(packet, "Link " + id + " was deleted");
+                }
+            }
+        }
+
+        // 2. Cancel in-flight transmissions on this link
+        List<Transmission> onThisLink = new ArrayList<>();
+        inFlight.removeIf(tx -> {
+            if (tx.linkId().equals(id)) {
+                onThisLink.add(tx);
+                return true;
+            }
+            return false;
+        });
+        for (Transmission tx : onThisLink) {
+            if (!tx.packet().isTerminal()) {
+                rerouteOrDrop(tx.packet(), "Link " + id + " was deleted during transit");
+            }
+        }
+
+        // 3. For any other live packets whose remaining route uses this link, reroute or drop
+        List<Packet> affected = new ArrayList<>();
+        for (Packet packet : packets) {
+            if (!packet.isTerminal() && packet.remainingRouteUses(id)) {
+                affected.add(packet);
+            }
+        }
+        affected.sort(Comparator.comparing(Packet::getId));
+        for (Packet packet : affected) {
+            cancelCurrentHop(packet);
+            rerouteOrDrop(packet, "Link " + id + " was deleted");
+        }
+    }
+
+    /**
+     * Drops any live packets currently located at, sourced from, or bound for the deleted node.
+     */
+    public void removeNode(String nodeId) {
+        if (nodeId == null || nodeId.isBlank()) {
+            return;
+        }
+        String id = nodeId.trim();
+        List<Packet> affected = new ArrayList<>();
+        for (Packet packet : packets) {
+            if (!packet.isTerminal()) {
+                if (packet.getCurrentNodeId().equals(id)
+                        || packet.getSourceId().equals(id)
+                        || packet.getDestinationId().equals(id)) {
+                    affected.add(packet);
+                }
+            }
+        }
+        affected.sort(Comparator.comparing(Packet::getId));
+        for (Packet packet : affected) {
+            cancelCurrentHop(packet);
+            drop(packet, "Node " + id + " was deleted");
+        }
+    }
+
+    /**
      * Advance until every packet is delivered, failed or dropped.
      */
     public void run() {
@@ -225,7 +305,12 @@ public final class SimulationEngine {
             if (packet.isTerminal()) {
                 continue;
             }
-            NetworkLink link = network.getLink(tx.linkId);
+            Optional<NetworkLink> linkOpt = network.findLink(tx.linkId);
+            if (linkOpt.isEmpty()) {
+                drop(packet, "Link " + tx.linkId + " was removed");
+                continue;
+            }
+            NetworkLink link = linkOpt.get();
             String nextNode = link.otherEndpoint(packet.getCurrentNodeId());
             packet.arriveAt(nextNode);
             if (nextNode.equals(packet.getDestinationId())) {

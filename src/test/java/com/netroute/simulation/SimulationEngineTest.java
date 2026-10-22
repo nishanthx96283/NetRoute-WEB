@@ -150,6 +150,48 @@ class SimulationEngineTest {
         assertTrue(engine.isIdle());
     }
 
+    @Test
+    void removeLinkCleansUpQueueAndReroutesInTransitPackets() {
+        triangleWithDetour();
+        engine = new SimulationEngine(network);
+
+        Packet packet = engine.submitPacket("A", "C", 1);
+        engine.step();
+        assertEquals(PacketStatus.IN_TRANSIT, packet.getStatus());
+        assertTrue(engine.hasQueueFor("BC"));
+
+        // Remove BC from both network and engine
+        network.removeLink("BC");
+        engine.removeLink("BC");
+
+        assertFalse(engine.hasQueueFor("BC"));
+
+        // Reroutes via AC
+        engine.run();
+        assertEquals(PacketStatus.DELIVERED, packet.getStatus());
+        assertEquals(1, packet.getRerouteCount());
+        assertTrue(packet.getVisitedNodeIds().contains("C"));
+    }
+
+    @Test
+    void removeNodeDropsInTransitPacketsDestinedForNode() {
+        triangleWithDetour();
+        engine = new SimulationEngine(network);
+
+        Packet packet = engine.submitPacket("A", "C", 1);
+        engine.step();
+        assertEquals(PacketStatus.IN_TRANSIT, packet.getStatus());
+
+        // Remove node C
+        engine.removeNode("C");
+        network.removeNode("C");
+
+        engine.run();
+        assertEquals(PacketStatus.DROPPED, packet.getStatus());
+        assertTrue(packet.getReason().orElse("").contains("Node C was deleted"));
+        assertEquals(1, engine.getDroppedCount());
+    }
+
     private void triangleWithDetour() {
         graph.addComputer("A", "A", 0, 0);
         graph.addComputer("B", "B", 1, 0);

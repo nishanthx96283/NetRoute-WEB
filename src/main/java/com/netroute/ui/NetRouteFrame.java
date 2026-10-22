@@ -3,6 +3,8 @@ package com.netroute.ui;
 import com.netroute.graph.GraphManager;
 import com.netroute.graph.Network;
 import com.netroute.model.NetworkLink;
+import com.netroute.model.NetworkNode;
+import com.netroute.model.NodeType;
 import com.netroute.model.Packet;
 import com.netroute.model.PacketStatus;
 import com.netroute.model.Route;
@@ -21,13 +23,16 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -54,8 +59,8 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
     public NetRouteFrame() {
         super("NetRoute - Network Traffic & Routing Simulator");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(1050, 700));
-        setPreferredSize(new Dimension(1180, 760));
+        setMinimumSize(new Dimension(1080, 720));
+        setPreferredSize(new Dimension(1220, 800));
 
         initBackend();
         initComponents();
@@ -91,15 +96,20 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
         statisticsPanel = new StatisticsPanel();
         statisticsPanel.updateStatistics(new NetworkStatistics(engine));
 
-        JPanel rightSidebar = new JPanel();
-        rightSidebar.setLayout(new BoxLayout(rightSidebar, BoxLayout.Y_AXIS));
-        rightSidebar.setPreferredSize(new Dimension(380, 700));
-        rightSidebar.add(controlPanel);
-        rightSidebar.add(statisticsPanel);
+        JPanel rightContent = new JPanel();
+        rightContent.setLayout(new BoxLayout(rightContent, BoxLayout.Y_AXIS));
+        rightContent.add(controlPanel);
+        rightContent.add(statisticsPanel);
+
+        JScrollPane rightSidebarScroll = new JScrollPane(rightContent);
+        rightSidebarScroll.setPreferredSize(new Dimension(420, 720));
+        rightSidebarScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        rightSidebarScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        rightSidebarScroll.setBorder(null);
 
         // Center split pane between canvas and right sidebar
-        JSplitPane centerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, topologyPanel, rightSidebar);
-        centerSplit.setResizeWeight(0.7);
+        JSplitPane centerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, topologyPanel, rightSidebarScroll);
+        centerSplit.setResizeWeight(0.68);
         centerSplit.setContinuousLayout(true);
         add(centerSplit, BorderLayout.CENTER);
 
@@ -131,10 +141,13 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
         menuFile.add(itemExit);
 
         JMenu menuSim = new JMenu("Simulation");
+        JMenuItem itemRandomize = new JMenuItem("Randomize Link Costs");
+        itemRandomize.addActionListener(e -> onRandomizeLinkCosts());
         JMenuItem itemStep = new JMenuItem("Step Simulation (1 Tick)");
         itemStep.addActionListener(e -> onStepSimulation());
         JMenuItem itemClearLog = new JMenuItem("Clear Log");
         itemClearLog.addActionListener(e -> logArea.setText(""));
+        menuSim.add(itemRandomize);
         menuSim.add(itemStep);
         menuSim.add(itemClearLog);
 
@@ -272,6 +285,167 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
         controlPanel.populateLinks(network);
         statisticsPanel.updateStatistics(new NetworkStatistics(engine));
         topologyPanel.repaint();
+    }
+
+    @Override
+    public void onRandomizeLinkCosts() {
+        graphManager.randomizeLinkCosts();
+        controlPanel.populateLinks(network);
+        topologyPanel.repaint();
+        statisticsPanel.updateStatistics(new NetworkStatistics(engine));
+
+        log("[Cost Randomization] All link costs randomized to positive integers (1-10). Active/inactive statuses preserved.");
+
+        // Automatically recalculate route for the selected endpoints if present
+        String src = controlPanel.getSelectedSource();
+        String dst = controlPanel.getSelectedDestination();
+        if (src != null && dst != null) {
+            onFindRoute(src, dst);
+        }
+    }
+
+    @Override
+    public void onAddNode(NodeType type) {
+        try {
+            NetworkNode node = graphManager.addDynamicNode(type);
+            controlPanel.populate(network);
+            topologyPanel.repaint();
+            statisticsPanel.updateStatistics(new NetworkStatistics(engine));
+
+            log(String.format("[Node Created] Added %s '%s' (%s) at (%.0f, %.0f). Initially unconnected.",
+                    node.getType(), node.getId(), node.getName(), node.getX(), node.getY()));
+        } catch (Exception ex) {
+            log("[Node Error] " + ex.getMessage());
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Node Creation Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    @Override
+    public void onConnectNodes(String sourceId, String destinationId, double cost) {
+        try {
+            NetworkLink link = graphManager.connectNodes(sourceId, destinationId, cost);
+            engine.queueFor(link.getId()); // Register queue in SimulationEngine
+
+            controlPanel.populateLinks(network);
+            topologyPanel.repaint();
+            statisticsPanel.updateStatistics(new NetworkStatistics(engine));
+
+            log(String.format("[Link Created] Connected %s <-> %s with link %s (Cost: %.1f).",
+                    sourceId, destinationId, link.getId(), link.getCost()));
+
+            // Recalculate route if endpoints match or could benefit from the new link
+            String src = controlPanel.getSelectedSource();
+            String dst = controlPanel.getSelectedDestination();
+            if (src != null && dst != null) {
+                onFindRoute(src, dst);
+            }
+        } catch (IllegalArgumentException ex) {
+            log("[Connection Error] " + ex.getMessage());
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Link Connection Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private boolean skipConfirmationForTesting = false;
+
+    void setSkipConfirmationForTesting(boolean skip) {
+        this.skipConfirmationForTesting = skip;
+    }
+
+    private boolean confirmDeletion(String message, String title) {
+        if (skipConfirmationForTesting || !isVisible() || GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        int confirm = JOptionPane.showConfirmDialog(
+                this,
+                message,
+                title,
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+        );
+        return confirm == JOptionPane.YES_OPTION;
+    }
+
+    @Override
+    public void onDeleteNode(String nodeId) {
+        if (nodeId == null || nodeId.trim().isEmpty() || !network.containsNode(nodeId.trim())) {
+            log("[Node Error] Cannot delete node: node does not exist: " + nodeId);
+            return;
+        }
+        String id = nodeId.trim();
+
+        if (!confirmDeletion("Are you sure you want to delete node '" + id + "' and all connected links?",
+                "Confirm Node Deletion")) {
+            log("[Node Deletion Cancelled] Deletion of node " + id + " cancelled by user.");
+            return;
+        }
+
+        String prevSrc = controlPanel.getSelectedSource();
+        String prevDst = controlPanel.getSelectedDestination();
+
+        List<String> incidentLinkIds = graphManager.getIncidentLinkIds(id);
+
+        for (String linkId : incidentLinkIds) {
+            engine.removeLink(linkId);
+        }
+        engine.removeNode(id);
+        graphManager.removeNode(id);
+
+        controlPanel.populate(network);
+        topologyPanel.repaint();
+        statisticsPanel.updateStatistics(new NetworkStatistics(engine));
+
+        log(String.format("[Node Deleted] Removed node '%s' and %d connected link(s): %s.",
+                id, incidentLinkIds.size(), incidentLinkIds));
+
+        if (id.equals(prevSrc) || id.equals(prevDst)) {
+            topologyPanel.clearHighlightedRoute();
+            topologyPanel.setSelectedEndpoints(controlPanel.getSelectedSource(), controlPanel.getSelectedDestination());
+            controlPanel.setRouteResult("Route cleared: node " + id + " was removed.", false);
+        } else {
+            String newSrc = controlPanel.getSelectedSource();
+            String newDst = controlPanel.getSelectedDestination();
+            if (newSrc != null && newDst != null && !newSrc.equals(newDst)) {
+                onFindRoute(newSrc, newDst);
+            } else {
+                topologyPanel.clearHighlightedRoute();
+                topologyPanel.setSelectedEndpoints(newSrc, newDst);
+            }
+        }
+    }
+
+    @Override
+    public void onDeleteLink(String linkId) {
+        if (linkId == null || linkId.trim().isEmpty() || !network.containsLink(linkId.trim())) {
+            log("[Link Error] Cannot delete link: link does not exist: " + linkId);
+            return;
+        }
+        String id = linkId.trim();
+
+        if (!confirmDeletion("Are you sure you want to delete link '" + id + "'?",
+                "Confirm Link Deletion")) {
+            log("[Link Deletion Cancelled] Deletion of link " + id + " cancelled by user.");
+            return;
+        }
+
+        NetworkLink link = network.getLink(id);
+        String desc = link != null ? (link.getSourceId() + " <-> " + link.getDestinationId()) : "";
+
+        engine.removeLink(id);
+        graphManager.removeLink(id);
+
+        controlPanel.populateLinks(network);
+        topologyPanel.repaint();
+        statisticsPanel.updateStatistics(new NetworkStatistics(engine));
+
+        log(String.format("[Link Deleted] Removed link '%s' (%s) from network and simulation engine.", id, desc));
+
+        String src = controlPanel.getSelectedSource();
+        String dst = controlPanel.getSelectedDestination();
+        if (src != null && dst != null && !src.equals(dst)) {
+            onFindRoute(src, dst);
+        } else {
+            topologyPanel.clearHighlightedRoute();
+        }
     }
 
     @Override

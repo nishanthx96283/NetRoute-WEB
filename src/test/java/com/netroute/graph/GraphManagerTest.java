@@ -4,15 +4,23 @@ import com.netroute.model.Computer;
 import com.netroute.model.NetworkLink;
 import com.netroute.model.NetworkNode;
 import com.netroute.model.NodeType;
+import com.netroute.model.Packet;
+import com.netroute.model.PacketStatus;
+import com.netroute.model.Route;
 import com.netroute.model.Router;
 import com.netroute.model.Server;
+import com.netroute.routing.DijkstraRouter;
+import com.netroute.simulation.SimulationEngine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -176,6 +184,307 @@ class GraphManagerTest {
         assertEquals(4, net.getOutgoingLinks("R1").size());
         assertTrue(reachesAll(net, "PC1"));
         assertTrue(reachesAll(net, "S1"));
+    }
+
+    // ==========================================
+    // FEATURE 1: RANDOMIZE LINK COSTS TESTS
+    // ==========================================
+
+    @Test
+    void randomizeLinkCostsAssignsIntegerCostsBetweenOneAndTen() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+
+        sample.randomizeLinkCosts();
+
+        for (NetworkLink link : net.getLinks().values()) {
+            double cost = link.getCost();
+            assertTrue(cost >= 1.0 && cost <= 10.0, "Cost should be within [1, 10]: " + cost);
+            assertEquals(cost, Math.floor(cost), "Cost must be an integer: " + cost);
+        }
+    }
+
+    @Test
+    void randomizeLinkCostsPreservesActiveStatusDelayAndCapacity() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+
+        // Deactivate one link before randomization
+        sample.deactivateLink("L4");
+        assertFalse(net.getLink("L4").isActive());
+
+        double delayBefore = net.getLink("L1").getDelay();
+        int capBefore = net.getLink("L1").getCapacity();
+
+        sample.randomizeLinkCosts();
+
+        // L4 must remain inactive, others active
+        assertFalse(net.getLink("L4").isActive(), "Deactivated link must remain inactive");
+        assertTrue(net.getLink("L1").isActive(), "Active link must remain active");
+
+        // Delay and capacity must not change
+        assertEquals(delayBefore, net.getLink("L1").getDelay());
+        assertEquals(capBefore, net.getLink("L1").getCapacity());
+    }
+
+    @Test
+    void randomizeLinkCostsRejectsInvalidRanges() {
+        assertThrows(IllegalArgumentException.class, () -> graph.randomizeLinkCosts(0, 10));
+        assertThrows(IllegalArgumentException.class, () -> graph.randomizeLinkCosts(-2, 5));
+        assertThrows(IllegalArgumentException.class, () -> graph.randomizeLinkCosts(10, 5));
+    }
+
+    @Test
+    void dijkstraRecalculatesRouteAfterLinkCostRandomization() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+        DijkstraRouter router = new DijkstraRouter();
+
+        // Initial shortest path PC1 -> S1: PC1 -> R1 -> R2 -> S1 (Cost: 2+1+2 = 5)
+        Route initialRoute = router.findRoute(net, "PC1", "S1").orElseThrow();
+        assertEquals(List.of("PC1", "R1", "R2", "S1"), initialRoute.getNodeIds());
+
+        // Make L6 (direct R1 -> S1) cheaper than (R1 -> R2 -> S1)
+        net.getLink("L6").setCost(1.0);
+        net.getLink("L4").setCost(10.0);
+        net.getLink("L5").setCost(10.0);
+
+        Route newRoute = router.findRoute(net, "PC1", "S1").orElseThrow();
+        assertEquals(List.of("PC1", "R1", "S1"), newRoute.getNodeIds(),
+                "Dijkstra should find the new cheaper path via L6");
+        assertEquals(3.0, newRoute.getTotalCost());
+    }
+
+    // ==========================================
+    // FEATURE 2: DYNAMIC NETWORK MANAGEMENT TESTS
+    // ==========================================
+
+    @Test
+    void generateNextNodeIdProducesUniqueSequentialIds() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+
+        assertEquals("PC4", sample.generateNextNodeId(NodeType.COMPUTER));
+        assertEquals("R3", sample.generateNextNodeId(NodeType.ROUTER));
+        assertEquals("S2", sample.generateNextNodeId(NodeType.SERVER));
+
+        // Add PC4 and check that next is PC5
+        sample.addDynamicNode(NodeType.COMPUTER);
+        assertEquals("PC5", sample.generateNextNodeId(NodeType.COMPUTER));
+    }
+
+    @Test
+    void generateNextLinkIdProducesUniqueSequentialIds() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        assertEquals("L7", sample.generateNextLinkId());
+
+        sample.addBidirectionalLink("L7", "PC1", "PC2", 3.0, 1.0, 1);
+        assertEquals("L8", sample.generateNextLinkId());
+    }
+
+    @Test
+    void addDynamicNodeCreatesUnconnectedNode() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+
+        NetworkNode newNode = sample.addDynamicNode(NodeType.SERVER);
+
+        assertEquals("S2", newNode.getId());
+        assertEquals(NodeType.SERVER, newNode.getType());
+        assertTrue(net.containsNode("S2"));
+        // Must be completely unconnected initially
+        assertTrue(net.getOutgoingLinks("S2").isEmpty(), "New node must initially have no links");
+        assertEquals(7, net.nodeCount());
+    }
+
+    @Test
+    void connectNodesCreatesBidirectionalLink() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+
+        NetworkNode newPc = sample.addDynamicNode(NodeType.COMPUTER); // PC4
+        NetworkLink newLink = sample.connectNodes("PC4", "R1", 3.5);
+
+        assertNotNull(newLink);
+        assertEquals("L7", newLink.getId());
+        assertEquals(3.5, newLink.getCost());
+        assertTrue(newLink.isActive());
+        assertFalse(newLink.isDirected());
+
+        assertTrue(sample.hasLinkBetween("PC4", "R1"));
+        assertTrue(sample.hasLinkBetween("R1", "PC4"));
+        assertEquals(7, net.linkCount());
+    }
+
+    @Test
+    void connectNodesRejectsSelfLoopAndDuplicateLinkInEitherDirection() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+
+        // 1. Self-loop
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("PC1", "PC1", 2.0));
+
+        // 2. Duplicate link in existing direction (PC1 -> R1 exists as L1)
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("PC1", "R1", 2.0));
+
+        // 3. Duplicate link in reverse direction (R1 -> PC1)
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("R1", "PC1", 2.0));
+
+        // 4. Non-existent endpoints
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("UNKNOWN", "PC1", 2.0));
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("PC1", "UNKNOWN", 2.0));
+    }
+
+    @Test
+    void connectNodesRejectsInvalidCosts() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        sample.addDynamicNode(NodeType.COMPUTER); // PC4
+
+        // Zero cost
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("PC4", "R1", 0.0));
+        // Negative cost
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("PC4", "R1", -1.5));
+        // NaN cost
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("PC4", "R1", Double.NaN));
+        // Infinite cost
+        assertThrows(IllegalArgumentException.class, () -> sample.connectNodes("PC4", "R1", Double.POSITIVE_INFINITY));
+    }
+
+    @Test
+    void dijkstraRoutesThroughNewlyAddedNodesAndLinks() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+        DijkstraRouter router = new DijkstraRouter();
+
+        // Add S2 and connect R2 <-> S2 with cost 1.0
+        sample.addDynamicNode(NodeType.SERVER); // S2
+        sample.connectNodes("R2", "S2", 1.0);
+
+        // Before connecting, PC1 could not reach S2; now it can
+        Route route = router.findRoute(net, "PC1", "S2").orElseThrow();
+        assertEquals(List.of("PC1", "R1", "R2", "S2"), route.getNodeIds());
+        // Cost: PC1-R1 (2.0) + R1-R2 (1.0) + R2-S2 (1.0) = 4.0
+        assertEquals(4.0, route.getTotalCost());
+    }
+
+    @Test
+    void simulationDeliversPacketAcrossDynamicallyAddedLink() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+        SimulationEngine engine = new SimulationEngine(net);
+
+        // Add PC4 and connect to R1
+        sample.addDynamicNode(NodeType.COMPUTER); // PC4
+        NetworkLink link = sample.connectNodes("PC4", "R1", 1.0);
+        engine.queueFor(link.getId());
+
+        // Send packet from PC4 to S1
+        Packet packet = engine.submitPacket("PC4", "S1", 1);
+        engine.run();
+
+        assertEquals(PacketStatus.DELIVERED, packet.getStatus());
+        assertEquals("PC4", packet.getSourceId());
+        assertEquals("S1", packet.getDestinationId());
+        assertTrue(packet.getVisitedNodeIds().contains("PC4"));
+        assertTrue(packet.getVisitedNodeIds().contains("S1"));
+    }
+
+    @Test
+    void linkFailureAndRestoreWorksOnDynamicallyAddedLink() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+        SimulationEngine engine = new SimulationEngine(net);
+
+        sample.addDynamicNode(NodeType.COMPUTER); // PC4
+        NetworkLink link = sample.connectNodes("PC4", "R1", 1.0);
+        engine.queueFor(link.getId());
+
+        assertTrue(link.isActive());
+        engine.failLink(link.getId());
+        assertFalse(link.isActive(), "Dynamically added link should be deactivated by failLink");
+
+        engine.restoreLink(link.getId());
+        assertTrue(link.isActive(), "Dynamically added link should be reactivated by restoreLink");
+    }
+
+    @Test
+    void removeLinkRemovesLinkFromNetworkAndAdjacencies() {
+        graph.addComputer("A", "Node A", 0, 0);
+        graph.addComputer("B", "Node B", 10, 10);
+        NetworkLink link = graph.addBidirectionalLink("AB", "A", "B", 3.0, 1.0, 1);
+
+        assertTrue(network.containsLink("AB"));
+        assertEquals(1, network.getActiveOutgoingLinks("A").size());
+        assertEquals(1, network.getActiveOutgoingLinks("B").size());
+
+        graph.removeLink("AB");
+
+        assertFalse(network.containsLink("AB"));
+        assertTrue(network.getActiveOutgoingLinks("A").isEmpty());
+        assertTrue(network.getActiveOutgoingLinks("B").isEmpty());
+
+        assertThrows(IllegalArgumentException.class, () -> graph.removeLink("AB"));
+    }
+
+    @Test
+    void removeNodeRemovesNodeAndAllIncidentLinks() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+
+        assertTrue(net.containsNode("PC1"));
+        assertTrue(net.containsLink("L1"));
+
+        sample.removeNode("PC1");
+
+        assertFalse(net.containsNode("PC1"));
+        assertFalse(net.containsLink("L1"));
+        assertTrue(net.getActiveOutgoingLinks("R1").stream().noneMatch(l -> l.getId().equals("L1")));
+
+        assertThrows(IllegalArgumentException.class, () -> sample.removeNode("PC1"));
+    }
+
+    @Test
+    void getIncidentLinkIdsReturnsAllConnectedLinks() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        List<String> r1Links = sample.getIncidentLinkIds("R1");
+
+        assertEquals(4, r1Links.size());
+        assertTrue(r1Links.containsAll(List.of("L1", "L2", "L4", "L6")));
+
+        List<String> r2Links = sample.getIncidentLinkIds("R2");
+        assertEquals(3, r2Links.size());
+        assertTrue(r2Links.containsAll(List.of("L3", "L4", "L5")));
+
+        assertTrue(sample.getIncidentLinkIds("NONEXISTENT").isEmpty());
+        assertTrue(sample.getIncidentLinkIds(null).isEmpty());
+    }
+
+    @Test
+    void dijkstraRecalculatesRouteWhenLinkOrNodeIsDeleted() {
+        GraphManager sample = GraphManager.createSampleNetwork();
+        Network net = sample.getNetwork();
+        DijkstraRouter router = new DijkstraRouter();
+
+        // Initially PC1 -> R1 -> R2 -> S1 via L1, L4, L5 (Cost: 2 + 1 + 2 = 5.0)
+        Route directRoute = router.findRoute(net, "PC1", "S1").orElseThrow();
+        assertEquals(List.of("PC1", "R1", "R2", "S1"), directRoute.getNodeIds());
+        assertEquals(5.0, directRoute.getTotalCost());
+
+        // Delete link L5 (R2 <-> S1)
+        sample.removeLink("L5");
+
+        // Route should now reroute via L6 (PC1 -> R1 -> S1, Cost: 2 + 5 = 7.0)
+        Route rerouted = router.findRoute(net, "PC1", "S1").orElseThrow();
+        assertEquals(List.of("PC1", "R1", "S1"), rerouted.getNodeIds());
+        assertEquals(7.0, rerouted.getTotalCost());
+        assertFalse(rerouted.getLinkIds().contains("L5"));
+
+        // Delete remaining link L6 (R1 <-> S1) so S1 is disconnected
+        sample.removeLink("L6");
+        Optional<Route> noRoute = router.findRoute(net, "PC1", "S1");
+        assertTrue(noRoute.isEmpty());
+
+        // Delete destination node S1
+        sample.removeNode("S1");
+        assertThrows(IllegalArgumentException.class, () -> router.findRoute(net, "PC1", "S1"));
     }
 
     private static boolean reachesAll(Network net, String startId) {
