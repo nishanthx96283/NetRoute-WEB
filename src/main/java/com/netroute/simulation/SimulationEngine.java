@@ -48,6 +48,7 @@ public final class SimulationEngine {
     private int deliveredCount;
     private int failedCount;
     private int droppedCount;
+    private int linkFailureCount;
 
     public SimulationEngine(Network network) {
         this(network, new DijkstraRouter());
@@ -102,6 +103,10 @@ public final class SimulationEngine {
         return droppedCount;
     }
 
+    public int getLinkFailureCount() {
+        return linkFailureCount;
+    }
+
     /**
      * Accepts a packet at the current tick. Unknown endpoints or an empty graph
      * fail the packet without throwing so other submissions can continue.
@@ -138,6 +143,7 @@ public final class SimulationEngine {
      */
     public void failLink(String linkId) {
         network.setLinkActive(linkId, false);
+        linkFailureCount++;
         List<Packet> affected = new ArrayList<>();
         for (Packet packet : packets) {
             if (!packet.isTerminal() && packet.remainingRouteUses(linkId)) {
