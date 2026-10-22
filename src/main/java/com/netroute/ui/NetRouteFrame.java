@@ -13,8 +13,11 @@ import com.netroute.simulation.SimulationEngine;
 import com.netroute.statistics.NetworkStatistics;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
@@ -26,10 +29,15 @@ import javax.swing.JTextArea;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
+import java.awt.RenderingHints;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -38,29 +46,46 @@ import java.util.Optional;
 /**
  * Main application window for NetRoute network simulator.
  * <p>
- * Integrates the network topology canvas, control panel, statistics display,
- * and activity event log. Connects to {@link DijkstraRouter}, {@link SimulationEngine},
- * and {@link NetworkStatistics}.
+ * Features a modern dark theme and card-based navigation between a dedicated Landing Page
+ * and the interactive Network Simulator workspace.
  */
-public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
+public class NetRouteFrame extends JFrame implements ControlPanel.Listener, LandingPage.Listener {
 
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
+    public static final String CARD_LANDING = "LANDING";
+    public static final String CARD_SIMULATOR = "SIMULATOR";
+    public static final String CARD_TECH_STACK = "TECH_STACK";
+    public static final String CARD_ABOUT = "ABOUT";
+
+    private final CardLayout cardLayout = new CardLayout();
+    private final JPanel rootPanel = new JPanel(cardLayout);
+    private String currentCard = CARD_LANDING;
+
+    // Backend models
     private GraphManager graphManager;
     private Network network;
     private DijkstraRouter router;
     private SimulationEngine engine;
 
+    // UI Components
+    private LandingPage landingPage;
+    private TechStackPage techStackPage;
+    private AboutPage aboutPage;
+    private JPanel simulatorView;
     private TopologyPanel topologyPanel;
     private ControlPanel controlPanel;
     private StatisticsPanel statisticsPanel;
     private JTextArea logArea;
+    private JLabel lblStatusBadge;
+
+    private boolean skipConfirmationForTesting = false;
 
     public NetRouteFrame() {
         super("NetRoute - Network Traffic & Routing Simulator");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(1080, 720));
-        setPreferredSize(new Dimension(1220, 800));
+        setMinimumSize(new Dimension(1100, 740));
+        setPreferredSize(new Dimension(1260, 820));
 
         initBackend();
         initComponents();
@@ -68,6 +93,9 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
 
         pack();
         setLocationRelativeTo(null);
+
+        // Open to Landing Page by default
+        showLandingPage();
 
         log("NetRoute initialized with sample campus network.");
         log("Sample topology: 3 Computers (PC1, PC2, PC3), 2 Routers (R1, R2), 1 Server (S1).");
@@ -82,13 +110,64 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
     }
 
     private void initComponents() {
-        setLayout(new BorderLayout(4, 4));
+        setLayout(new BorderLayout());
+        setBackground(Theme.BG_MAIN);
 
-        // 1. Center Topology Canvas
+        // 1. Landing Page Card
+        landingPage = new LandingPage(this);
+        rootPanel.add(landingPage, CARD_LANDING);
+
+        // 2. Tech Stack Page Card
+        TechStackPage.NavigationHandler techStackNav = new TechStackPage.NavigationHandler() {
+            @Override
+            public void onBackToHome() {
+                showLandingPage();
+            }
+
+            @Override
+            public void onLaunchSimulator() {
+                showSimulatorPage();
+            }
+        };
+        techStackPage = new TechStackPage(techStackNav);
+        rootPanel.add(techStackPage, CARD_TECH_STACK);
+
+        // 3. About Page Card
+        AboutPage.NavigationHandler aboutNav = new AboutPage.NavigationHandler() {
+            @Override
+            public void onBackToHome() {
+                showLandingPage();
+            }
+
+            @Override
+            public void onLaunchSimulator() {
+                showSimulatorPage();
+            }
+        };
+        aboutPage = new AboutPage(aboutNav);
+        rootPanel.add(aboutPage, CARD_ABOUT);
+
+        // 4. Simulator Page Card
+        simulatorView = createSimulatorView();
+        rootPanel.add(simulatorView, CARD_SIMULATOR);
+
+        add(rootPanel, BorderLayout.CENTER);
+    }
+
+    private JPanel createSimulatorView() {
+        JPanel view = new JPanel(new BorderLayout());
+        view.setBackground(Theme.BG_MAIN);
+
+        // Top Navigation Bar
+        view.add(createSimulatorNavBar(), BorderLayout.NORTH);
+
+        // Center: Topology Canvas & Right Control/Statistics Sidebar
         topologyPanel = new TopologyPanel(network);
-        topologyPanel.setBorder(BorderFactory.createTitledBorder("Network Topology Map (Drag nodes to reposition)"));
+        topologyPanel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                BorderFactory.createEmptyBorder(2, 2, 2, 2)
+        ));
 
-        // 2. Right Side: Controls and Statistics in a vertical box
         controlPanel = new ControlPanel();
         controlPanel.setListener(this);
         controlPanel.populate(network);
@@ -98,62 +177,218 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
 
         JPanel rightContent = new JPanel();
         rightContent.setLayout(new BoxLayout(rightContent, BoxLayout.Y_AXIS));
+        rightContent.setBackground(Theme.BG_PANEL);
         rightContent.add(controlPanel);
+        rightContent.add(Box.createRigidArea(new Dimension(0, 4)));
         rightContent.add(statisticsPanel);
 
         JScrollPane rightSidebarScroll = new JScrollPane(rightContent);
         rightSidebarScroll.setPreferredSize(new Dimension(420, 720));
+        rightSidebarScroll.setBackground(Theme.BG_PANEL);
+        rightSidebarScroll.getViewport().setBackground(Theme.BG_PANEL);
         rightSidebarScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
         rightSidebarScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-        rightSidebarScroll.setBorder(null);
+        rightSidebarScroll.setBorder(BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1));
+        rightSidebarScroll.getVerticalScrollBar().setUnitIncrement(16);
 
-        // Center split pane between canvas and right sidebar
         JSplitPane centerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, topologyPanel, rightSidebarScroll);
         centerSplit.setResizeWeight(0.68);
         centerSplit.setContinuousLayout(true);
-        add(centerSplit, BorderLayout.CENTER);
+        centerSplit.setDividerSize(6);
+        centerSplit.setBackground(Theme.BG_MAIN);
+        centerSplit.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+        view.add(centerSplit, BorderLayout.CENTER);
 
-        // 3. Bottom: Event & Simulation Activity Log
-        logArea = new JTextArea(8, 60);
+        // Bottom: Activity Log
+        view.add(createActivityLogPanel(), BorderLayout.SOUTH);
+        return view;
+    }
+
+    private JPanel createSimulatorNavBar() {
+        JPanel navBar = new JPanel(new BorderLayout());
+        navBar.setBackground(Theme.BG_PANEL);
+        navBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(10, 16, 10, 16)
+        ));
+
+        // Left Branding & Title
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+        left.setOpaque(false);
+
+        // Logo Icon
+        JLabel logoIcon = new JLabel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(Theme.ACCENT_BLUE);
+                g2.drawLine(5, 17, 12, 5);
+                g2.drawLine(12, 5, 19, 17);
+                g2.drawLine(5, 17, 19, 17);
+                g2.setColor(Theme.ACCENT_CYAN);
+                g2.fillOval(8, 2, 8, 8);
+                g2.setColor(Theme.TEXT_PRIMARY);
+                g2.fillOval(2, 14, 6, 6);
+                g2.fillOval(16, 14, 6, 6);
+                g2.dispose();
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                return new Dimension(24, 22);
+            }
+        };
+
+        JLabel lblBrand = new JLabel("NetRoute");
+        lblBrand.setFont(Theme.FONT_TITLE);
+        lblBrand.setForeground(Theme.TEXT_PRIMARY);
+
+        JLabel lblSep = new JLabel("›");
+        lblSep.setFont(Theme.FONT_TITLE);
+        lblSep.setForeground(Theme.TEXT_MUTED);
+
+        JLabel lblTitle = new JLabel("Network Simulator");
+        lblTitle.setFont(Theme.FONT_BODY_BOLD);
+        lblTitle.setForeground(Theme.ACCENT_CYAN);
+
+        left.add(logoIcon);
+        left.add(lblBrand);
+        left.add(lblSep);
+        left.add(lblTitle);
+
+        // Right Actions & Status Badge
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+        right.setOpaque(false);
+
+        lblStatusBadge = new JLabel("  ● Simulation Ready  ") {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(Theme.BG_INPUT);
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+                g2.setColor(Theme.BORDER_SUBTLE);
+                g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 10, 10);
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        lblStatusBadge.setFont(Theme.FONT_SMALL);
+        lblStatusBadge.setForeground(Theme.STATUS_SUCCESS);
+        lblStatusBadge.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+
+        JButton btnHome = Theme.createButton("← Home", Theme.ButtonStyle.SECONDARY);
+        btnHome.setPreferredSize(new Dimension(95, 30));
+        btnHome.setFont(Theme.FONT_SMALL);
+        btnHome.addActionListener(e -> showLandingPage());
+
+        JButton btnReset = Theme.createButton("Reset Network", Theme.ButtonStyle.OUTLINE);
+        btnReset.setPreferredSize(new Dimension(115, 30));
+        btnReset.setFont(Theme.FONT_SMALL);
+        btnReset.addActionListener(e -> onResetNetwork());
+
+        right.add(lblStatusBadge);
+        right.add(btnReset);
+        right.add(btnHome);
+
+        navBar.add(left, BorderLayout.WEST);
+        navBar.add(right, BorderLayout.EAST);
+        return navBar;
+    }
+
+    private JPanel createActivityLogPanel() {
+        JPanel panel = new JPanel(new BorderLayout(4, 4));
+        panel.setBackground(Theme.BG_PANEL);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.BORDER_SUBTLE),
+                BorderFactory.createEmptyBorder(6, 12, 6, 12)
+        ));
+
+        // Header with title and Clear Log button
+        JPanel header = new JPanel(new BorderLayout());
+        header.setOpaque(false);
+
+        JLabel lblTitle = new JLabel("Activity & Event Log");
+        lblTitle.setFont(Theme.FONT_SMALL);
+        lblTitle.setForeground(Theme.TEXT_SECONDARY);
+
+        JButton btnClear = Theme.createButton("Clear", Theme.ButtonStyle.OUTLINE);
+        btnClear.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+        btnClear.setPreferredSize(new Dimension(55, 20));
+        btnClear.addActionListener(e -> {
+            if (logArea != null) {
+                logArea.setText("");
+            }
+        });
+
+        header.add(lblTitle, BorderLayout.WEST);
+        header.add(btnClear, BorderLayout.EAST);
+
+        logArea = new JTextArea(6, 60);
         logArea.setEditable(false);
-        logArea.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        logArea.setBackground(new Color(250, 250, 252));
-        logArea.setForeground(new Color(33, 37, 41));
+        logArea.setFont(Theme.FONT_MONO);
+        logArea.setBackground(Theme.BG_INPUT);
+        logArea.setForeground(Theme.TEXT_PRIMARY);
+        logArea.setCaretColor(Theme.ACCENT_CYAN);
+        logArea.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
 
         JScrollPane logScroll = new JScrollPane(logArea);
-        logScroll.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Event & Simulation Activity Log"),
-                BorderFactory.createEmptyBorder(2, 4, 4, 4)
-        ));
-        add(logScroll, BorderLayout.SOUTH);
+        logScroll.setBorder(BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1));
+        logScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+
+        panel.add(header, BorderLayout.NORTH);
+        panel.add(logScroll, BorderLayout.CENTER);
+        return panel;
     }
 
     private void initMenuBar() {
         JMenuBar menuBar = new JMenuBar();
+        menuBar.setBackground(Theme.BG_PANEL);
+        menuBar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE));
 
-        JMenu menuFile = new JMenu("File");
-        JMenuItem itemReset = new JMenuItem("Reset Sample Network");
+        JMenu menuFile = createStyledMenu("File");
+        JMenuItem itemHome = createStyledMenuItem("Home");
+        itemHome.addActionListener(e -> showLandingPage());
+        JMenuItem itemSimulator = createStyledMenuItem("Network Simulator");
+        itemSimulator.addActionListener(e -> showSimulatorPage());
+        JMenuItem itemTechStack = createStyledMenuItem("Tech Stack & Architecture");
+        itemTechStack.addActionListener(e -> showTechStackPage());
+        JMenuItem itemAboutFile = createStyledMenuItem("About NetRoute");
+        itemAboutFile.addActionListener(e -> showAboutPage());
+        JMenuItem itemReset = createStyledMenuItem("Reset Sample Network");
         itemReset.addActionListener(e -> onResetNetwork());
-        JMenuItem itemExit = new JMenuItem("Exit");
+        JMenuItem itemExit = createStyledMenuItem("Exit");
         itemExit.addActionListener(e -> System.exit(0));
+
+        menuFile.add(itemHome);
+        menuFile.add(itemSimulator);
+        menuFile.add(itemTechStack);
+        menuFile.add(itemAboutFile);
+        menuFile.addSeparator();
         menuFile.add(itemReset);
         menuFile.addSeparator();
         menuFile.add(itemExit);
 
-        JMenu menuSim = new JMenu("Simulation");
-        JMenuItem itemRandomize = new JMenuItem("Randomize Link Costs");
+        JMenu menuSim = createStyledMenu("Simulation");
+        JMenuItem itemRandomize = createStyledMenuItem("Randomize Link Costs");
         itemRandomize.addActionListener(e -> onRandomizeLinkCosts());
-        JMenuItem itemStep = new JMenuItem("Step Simulation (1 Tick)");
+        JMenuItem itemStep = createStyledMenuItem("Step Simulation (1 Tick)");
         itemStep.addActionListener(e -> onStepSimulation());
-        JMenuItem itemClearLog = new JMenuItem("Clear Log");
-        itemClearLog.addActionListener(e -> logArea.setText(""));
+        JMenuItem itemClearLog = createStyledMenuItem("Clear Log");
+        itemClearLog.addActionListener(e -> {
+            if (logArea != null) {
+                logArea.setText("");
+            }
+        });
         menuSim.add(itemRandomize);
         menuSim.add(itemStep);
         menuSim.add(itemClearLog);
 
-        JMenu menuHelp = new JMenu("Help");
-        JMenuItem itemAbout = new JMenuItem("About NetRoute");
-        itemAbout.addActionListener(e -> showAboutDialog());
+        JMenu menuHelp = createStyledMenu("Help");
+        JMenuItem itemAbout = createStyledMenuItem("About NetRoute");
+        itemAbout.addActionListener(e -> showAboutPage());
         menuHelp.add(itemAbout);
 
         menuBar.add(menuFile);
@@ -162,13 +397,88 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
         setJMenuBar(menuBar);
     }
 
-    // ---- ControlPanel.Listener Callbacks ----
+    private JMenu createStyledMenu(String title) {
+        JMenu menu = new JMenu(title);
+        menu.setFont(Theme.FONT_BODY);
+        menu.setForeground(Theme.TEXT_PRIMARY);
+        return menu;
+    }
+
+    private JMenuItem createStyledMenuItem(String title) {
+        JMenuItem item = new JMenuItem(title);
+        item.setFont(Theme.FONT_BODY);
+        return item;
+    }
+
+    // ==========================================
+    // Navigation
+    // ==========================================
+
+    public void showLandingPage() {
+        cardLayout.show(rootPanel, CARD_LANDING);
+        this.currentCard = CARD_LANDING;
+    }
+
+    public void showSimulatorPage() {
+        cardLayout.show(rootPanel, CARD_SIMULATOR);
+        this.currentCard = CARD_SIMULATOR;
+        if (topologyPanel != null) {
+            topologyPanel.repaint();
+        }
+    }
+
+    public void showTechStackPage() {
+        cardLayout.show(rootPanel, CARD_TECH_STACK);
+        this.currentCard = CARD_TECH_STACK;
+    }
+
+    public void showAboutPage() {
+        cardLayout.show(rootPanel, CARD_ABOUT);
+        this.currentCard = CARD_ABOUT;
+    }
+
+    public String getCurrentCard() {
+        return currentCard;
+    }
+
+    @Override
+    public void onLaunchSimulator() {
+        showSimulatorPage();
+    }
+
+    @Override
+    public void onShowTechStack() {
+        showTechStackPage();
+    }
+
+    @Override
+    public void onShowAbout() {
+        showAboutPage();
+    }
+
+    private void setStatusBadge(String text, Color color) {
+        if (lblStatusBadge != null) {
+            lblStatusBadge.setText("  ● " + text + "  ");
+            lblStatusBadge.setForeground(color);
+        }
+    }
+
+    // ==========================================
+    // ControlPanel.Listener Implementations
+    // ==========================================
 
     @Override
     public void onFindRoute(String sourceId, String destinationId) {
         topologyPanel.setSelectedEndpoints(sourceId, destinationId);
-        Optional<Route> routeOpt = router.findRoute(network, sourceId, destinationId);
 
+        if (!network.containsNode(sourceId) || !network.containsNode(destinationId)) {
+            topologyPanel.clearHighlightedRoute();
+            controlPanel.setRouteResult("Invalid endpoint: node does not exist.", false);
+            log(String.format("[Dijkstra Error] Unknown endpoints (%s -> %s).", sourceId, destinationId));
+            return;
+        }
+
+        Optional<Route> routeOpt = router.findRoute(network, sourceId, destinationId);
         if (routeOpt.isPresent()) {
             Route route = routeOpt.get();
             topologyPanel.setHighlightedRoute(route);
@@ -178,19 +488,21 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
 
             log(String.format("[Dijkstra] Shortest path %s -> %s: %s | Cost: %.1f | Hops: %d",
                     sourceId, destinationId, pathStr, route.getTotalCost(), route.getLinks().size()));
+            setStatusBadge("Route Found", Theme.ACCENT_CYAN);
         } else {
             topologyPanel.clearHighlightedRoute();
             controlPanel.setRouteResult("No active route found between " + sourceId + " and " + destinationId, false);
             log(String.format("[Dijkstra] No route exists from %s to %s. A link may be inactive or partitioned.",
                     sourceId, destinationId));
+            setStatusBadge("No Route", Theme.STATUS_ERROR);
         }
     }
 
     @Override
     public void onSendPacket(String sourceId, String destinationId) {
         topologyPanel.setSelectedEndpoints(sourceId, destinationId);
+        setStatusBadge("Transmitting", Theme.STATUS_WARNING);
 
-        // Submit packet to existing engine
         Packet packet = engine.submitPacket(sourceId, destinationId, 1);
         log(String.format("[Packet Submit] %s created from %s -> %s at tick %d.",
                 packet.getId(), sourceId, destinationId, packet.getCreatedAt()));
@@ -198,12 +510,10 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
         // Run simulation to completion
         engine.run();
 
-        // Highlight packet route if available
         if (packet.getRoute().isPresent()) {
             topologyPanel.setHighlightedRoute(packet.getRoute().get());
         }
 
-        // Report result
         if (packet.getStatus() == PacketStatus.DELIVERED) {
             long deliveredTick = packet.getDeliveredAt().orElse(0L);
             long delay = deliveredTick - packet.getCreatedAt();
@@ -216,13 +526,14 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
             }
             controlPanel.setRouteResult(String.format("%s DELIVERED in %d ticks (Reroutes: %d)",
                     packet.getId(), delay, packet.getRerouteCount()), true);
+            setStatusBadge("Delivered", Theme.STATUS_SUCCESS);
         } else {
             String reason = packet.getReason().orElse("No available route");
             log(String.format("[Packet %s] %s: %s", packet.getId(), packet.getStatus(), reason));
             controlPanel.setRouteResult(String.format("%s %s: %s", packet.getId(), packet.getStatus(), reason), false);
+            setStatusBadge("Packet Failed", Theme.STATUS_ERROR);
         }
 
-        // Update statistics and view
         statisticsPanel.updateStatistics(new NetworkStatistics(engine));
         topologyPanel.repaint();
     }
@@ -235,6 +546,9 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
 
         log(String.format("[Simulation Step] Advanced tick %d -> %d. Idle: %b",
                 prevTick, newTick, engine.isIdle()));
+
+        setStatusBadge(engine.isIdle() ? "Simulation Ready" : "In Progress",
+                engine.isIdle() ? Theme.STATUS_SUCCESS : Theme.STATUS_WARNING);
 
         statisticsPanel.updateStatistics(new NetworkStatistics(engine));
         topologyPanel.repaint();
@@ -253,15 +567,14 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
             return;
         }
 
-        // Deactivate and reroute affected in-transit packets
         engine.failLink(linkId);
-
         log(String.format("[Link Failed] Link %s (%s - %s) deactivated. Rerouting affected packets if any.",
                 linkId, link.getSourceId(), link.getDestinationId()));
 
         controlPanel.populateLinks(network);
         statisticsPanel.updateStatistics(new NetworkStatistics(engine));
         topologyPanel.repaint();
+        setStatusBadge("Link Deactivated", Theme.STATUS_WARNING);
     }
 
     @Override
@@ -278,13 +591,13 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
         }
 
         engine.restoreLink(linkId);
-
         log(String.format("[Link Restored] Link %s (%s - %s) restored to ACTIVE state.",
                 linkId, link.getSourceId(), link.getDestinationId()));
 
         controlPanel.populateLinks(network);
         statisticsPanel.updateStatistics(new NetworkStatistics(engine));
         topologyPanel.repaint();
+        setStatusBadge("Link Restored", Theme.STATUS_SUCCESS);
     }
 
     @Override
@@ -296,12 +609,12 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
 
         log("[Cost Randomization] All link costs randomized to positive integers (1-10). Active/inactive statuses preserved.");
 
-        // Automatically recalculate route for the selected endpoints if present
         String src = controlPanel.getSelectedSource();
         String dst = controlPanel.getSelectedDestination();
         if (src != null && dst != null) {
             onFindRoute(src, dst);
         }
+        setStatusBadge("Costs Randomized", Theme.ACCENT_CYAN);
     }
 
     @Override
@@ -314,6 +627,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
 
             log(String.format("[Node Created] Added %s '%s' (%s) at (%.0f, %.0f). Initially unconnected.",
                     node.getType(), node.getId(), node.getName(), node.getX(), node.getY()));
+            setStatusBadge("Node Added", Theme.STATUS_SUCCESS);
         } catch (Exception ex) {
             log("[Node Error] " + ex.getMessage());
             JOptionPane.showMessageDialog(this, ex.getMessage(), "Node Creation Error", JOptionPane.ERROR_MESSAGE);
@@ -324,7 +638,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
     public void onConnectNodes(String sourceId, String destinationId, double cost) {
         try {
             NetworkLink link = graphManager.connectNodes(sourceId, destinationId, cost);
-            engine.queueFor(link.getId()); // Register queue in SimulationEngine
+            engine.queueFor(link.getId());
 
             controlPanel.populateLinks(network);
             topologyPanel.repaint();
@@ -333,19 +647,17 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
             log(String.format("[Link Created] Connected %s <-> %s with link %s (Cost: %.1f).",
                     sourceId, destinationId, link.getId(), link.getCost()));
 
-            // Recalculate route if endpoints match or could benefit from the new link
             String src = controlPanel.getSelectedSource();
             String dst = controlPanel.getSelectedDestination();
             if (src != null && dst != null) {
                 onFindRoute(src, dst);
             }
+            setStatusBadge("Link Created", Theme.STATUS_SUCCESS);
         } catch (IllegalArgumentException ex) {
             log("[Connection Error] " + ex.getMessage());
             JOptionPane.showMessageDialog(this, ex.getMessage(), "Link Connection Error", JOptionPane.ERROR_MESSAGE);
         }
     }
-
-    private boolean skipConfirmationForTesting = false;
 
     void setSkipConfirmationForTesting(boolean skip) {
         this.skipConfirmationForTesting = skip;
@@ -411,6 +723,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
                 topologyPanel.setSelectedEndpoints(newSrc, newDst);
             }
         }
+        setStatusBadge("Node Deleted", Theme.STATUS_ERROR);
     }
 
     @Override
@@ -446,6 +759,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
         } else {
             topologyPanel.clearHighlightedRoute();
         }
+        setStatusBadge("Link Deleted", Theme.STATUS_ERROR);
     }
 
     @Override
@@ -458,20 +772,20 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener {
 
         log("--------------------------------------------------");
         log("[Reset] Network reloaded with clean sample topology and new simulation engine.");
+        setStatusBadge("Simulation Ready", Theme.STATUS_SUCCESS);
     }
 
     private void log(String message) {
+        if (logArea == null) {
+            return;
+        }
         String timeStr = LocalTime.now().format(TIME_FORMAT);
         logArea.append("[" + timeStr + "] " + message + "\n");
         logArea.setCaretPosition(logArea.getDocument().getLength());
     }
 
     private void showAboutDialog() {
-        String msg = "NetRoute Network Simulator\n\n"
-                + "A Java desktop application for simulating network traffic, Dijkstra routing,\n"
-                + "discrete-event packet simulation, dynamic link failures, and performance metrics.\n\n"
-                + "College Data Structures & Algorithms Project.";
-        JOptionPane.showMessageDialog(this, msg, "About NetRoute", JOptionPane.INFORMATION_MESSAGE);
+        showAboutPage();
     }
 
     public static void launch() {

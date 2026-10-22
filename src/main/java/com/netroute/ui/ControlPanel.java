@@ -5,6 +5,7 @@ import com.netroute.model.NetworkLink;
 import com.netroute.model.NodeType;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
@@ -25,7 +26,7 @@ import java.util.List;
 
 /**
  * Control panel for routing, packet simulation, link failure management,
- * link cost randomization, and dynamic network management (add/delete nodes and links).
+ * link cost randomization, and dynamic network management with dark theme styling.
  */
 public class ControlPanel extends JPanel {
 
@@ -59,11 +60,25 @@ public class ControlPanel extends JPanel {
 
     public ControlPanel() {
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+        setBackground(Theme.BG_PANEL);
         setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 
+        // Apply dark styling to combo boxes and inputs
+        Theme.styleComboBox(cmbSource);
+        Theme.styleComboBox(cmbDestination);
+        Theme.styleComboBox(cmbLinks);
+        Theme.styleComboBox(cmbNodeType);
+        Theme.styleComboBox(cmbConnectNodeA);
+        Theme.styleComboBox(cmbConnectNodeB);
+        Theme.styleComboBox(cmbDeleteNode);
+        Theme.styleTextField(txtLinkCost);
+
         add(createRoutingPanel());
+        add(Box.createRigidArea(new Dimension(0, 8)));
         add(createLinkControlPanel());
+        add(Box.createRigidArea(new Dimension(0, 8)));
         add(createNetworkManagementPanel());
+        add(Box.createRigidArea(new Dimension(0, 8)));
         add(createSimulationActionPanel());
     }
 
@@ -159,31 +174,49 @@ public class ControlPanel extends JPanel {
     }
 
     public void setRouteResult(String text, boolean success) {
-        lblRouteResult.setText(text);
-        lblRouteResult.setForeground(success ? new Color(13, 110, 253) : new Color(220, 53, 69));
+        lblRouteResult.setText(" " + text);
+        lblRouteResult.setForeground(success ? Theme.ACCENT_CYAN : Theme.STATUS_ERROR);
     }
 
     private JPanel createRoutingPanel() {
-        JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Route Calculation & Packet Sending"),
-                BorderFactory.createEmptyBorder(6, 8, 6, 8)
-        ));
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+        panel.setBackground(Theme.BG_PANEL);
+        panel.setBorder(Theme.createTitledBorder("Route Calculation & Packet Dispatch"));
 
         JPanel formGrid = new JPanel(new GridLayout(2, 2, 8, 6));
-        formGrid.add(new JLabel("Source Node:"));
+        formGrid.setOpaque(false);
+
+        JLabel lblSrc = new JLabel("Source Node:");
+        lblSrc.setFont(Theme.FONT_BODY);
+        lblSrc.setForeground(Theme.TEXT_SECONDARY);
+
+        JLabel lblDst = new JLabel("Destination Node:");
+        lblDst.setFont(Theme.FONT_BODY);
+        lblDst.setForeground(Theme.TEXT_SECONDARY);
+
+        formGrid.add(lblSrc);
         formGrid.add(cmbSource);
-        formGrid.add(new JLabel("Destination Node:"));
+        formGrid.add(lblDst);
         formGrid.add(cmbDestination);
 
         JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 4));
-        JButton btnFindRoute = new JButton("Calculate Route (Dijkstra)");
-        JButton btnSendPacket = new JButton("Send Packet & Run");
+        btnRow.setOpaque(false);
+
+        JButton btnFindRoute = Theme.createButton("Calculate Route", Theme.ButtonStyle.PRIMARY);
+        JButton btnSendPacket = Theme.createButton("Send Packet & Run", Theme.ButtonStyle.SUCCESS);
         btnRow.add(btnFindRoute);
         btnRow.add(btnSendPacket);
 
-        lblRouteResult.setFont(new Font("SansSerif", Font.BOLD, 11));
-        lblRouteResult.setForeground(Color.DARK_GRAY);
+        // Result Card
+        JPanel resultCard = new JPanel(new BorderLayout());
+        resultCard.setBackground(Theme.BG_INPUT);
+        resultCard.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(Theme.BORDER_SUBTLE, 1),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)
+        ));
+        lblRouteResult.setFont(Theme.FONT_SMALL);
+        lblRouteResult.setForeground(Theme.TEXT_MUTED);
+        resultCard.add(lblRouteResult, BorderLayout.CENTER);
 
         btnFindRoute.addActionListener(e -> {
             String src = (String) cmbSource.getSelectedItem();
@@ -203,31 +236,30 @@ public class ControlPanel extends JPanel {
 
         panel.add(formGrid, BorderLayout.NORTH);
         panel.add(btnRow, BorderLayout.CENTER);
-        panel.add(lblRouteResult, BorderLayout.SOUTH);
+        panel.add(resultCard, BorderLayout.SOUTH);
         return panel;
     }
 
     private JPanel createLinkControlPanel() {
-        JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Link Control & Randomization"),
-                BorderFactory.createEmptyBorder(6, 8, 6, 8)
-        ));
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+        panel.setBackground(Theme.BG_PANEL);
+        panel.setBorder(Theme.createTitledBorder("Link Control & Randomization"));
 
-        JPanel linkSelectPanel = new JPanel(new BorderLayout(5, 5));
-        linkSelectPanel.add(new JLabel("Select Link:"), BorderLayout.WEST);
+        JPanel linkSelectPanel = new JPanel(new BorderLayout(6, 4));
+        linkSelectPanel.setOpaque(false);
+        JLabel lblLink = new JLabel("Select Link:");
+        lblLink.setFont(Theme.FONT_BODY);
+        lblLink.setForeground(Theme.TEXT_SECONDARY);
+        linkSelectPanel.add(lblLink, BorderLayout.WEST);
         linkSelectPanel.add(cmbLinks, BorderLayout.CENTER);
 
-        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 4));
-        JButton btnFail = new JButton("Fail Link");
-        JButton btnRestore = new JButton("Restore Link");
-        JButton btnDeleteLink = new JButton("Delete Link");
-        JButton btnRandomize = new JButton("Randomize Link Costs");
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 6, 4));
+        btnRow.setOpaque(false);
 
-        btnFail.setForeground(new Color(180, 40, 50));
-        btnRestore.setForeground(new Color(30, 130, 60));
-        btnDeleteLink.setForeground(new Color(180, 40, 50));
-        btnRandomize.setForeground(new Color(40, 70, 160));
+        JButton btnFail = Theme.createButton("Fail Link", Theme.ButtonStyle.DESTRUCTIVE);
+        JButton btnRestore = Theme.createButton("Restore Link", Theme.ButtonStyle.SUCCESS);
+        JButton btnDeleteLink = Theme.createButton("Delete Link", Theme.ButtonStyle.DESTRUCTIVE);
+        JButton btnRandomize = Theme.createButton("Randomize Costs", Theme.ButtonStyle.SECONDARY);
 
         btnRow.add(btnFail);
         btnRow.add(btnRestore);
@@ -276,16 +308,19 @@ public class ControlPanel extends JPanel {
     private JPanel createNetworkManagementPanel() {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Dynamic Network Management"),
-                BorderFactory.createEmptyBorder(4, 8, 6, 8)
-        ));
+        panel.setBackground(Theme.BG_PANEL);
+        panel.setBorder(Theme.createTitledBorder("Dynamic Network Management"));
 
         // Row 1: Add Node controls
         JPanel nodeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        nodeRow.add(new JLabel("New Node Type:"));
+        nodeRow.setOpaque(false);
+        JLabel lblType = new JLabel("New Node Type:");
+        lblType.setFont(Theme.FONT_BODY);
+        lblType.setForeground(Theme.TEXT_SECONDARY);
+        nodeRow.add(lblType);
         nodeRow.add(cmbNodeType);
-        JButton btnAddNode = new JButton("Add Node");
+
+        JButton btnAddNode = Theme.createButton("Add Node", Theme.ButtonStyle.PRIMARY);
         nodeRow.add(btnAddNode);
 
         btnAddNode.addActionListener(e -> {
@@ -297,16 +332,28 @@ public class ControlPanel extends JPanel {
 
         // Row 2: Connect Nodes controls
         JPanel connectGrid = new JPanel(new GridLayout(2, 2, 6, 4));
-        connectGrid.add(new JLabel("Node A:"));
+        connectGrid.setOpaque(false);
+        JLabel lblA = new JLabel("Node A:");
+        lblA.setFont(Theme.FONT_BODY);
+        lblA.setForeground(Theme.TEXT_SECONDARY);
+        JLabel lblB = new JLabel("Node B:");
+        lblB.setFont(Theme.FONT_BODY);
+        lblB.setForeground(Theme.TEXT_SECONDARY);
+
+        connectGrid.add(lblA);
         connectGrid.add(cmbConnectNodeA);
-        connectGrid.add(new JLabel("Node B:"));
+        connectGrid.add(lblB);
         connectGrid.add(cmbConnectNodeB);
 
         JPanel costRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        costRow.add(new JLabel("Link Cost:"));
+        costRow.setOpaque(false);
+        JLabel lblCost = new JLabel("Link Cost:");
+        lblCost.setFont(Theme.FONT_BODY);
+        lblCost.setForeground(Theme.TEXT_SECONDARY);
+        costRow.add(lblCost);
         costRow.add(txtLinkCost);
-        JButton btnConnect = new JButton("Connect Nodes");
-        btnConnect.setFont(new Font("SansSerif", Font.BOLD, 12));
+
+        JButton btnConnect = Theme.createButton("Connect Nodes", Theme.ButtonStyle.PRIMARY);
         costRow.add(btnConnect);
 
         btnConnect.addActionListener(e -> {
@@ -341,10 +388,14 @@ public class ControlPanel extends JPanel {
 
         // Row 3: Delete Node controls
         JPanel deleteNodeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        deleteNodeRow.add(new JLabel("Delete Node:"));
+        deleteNodeRow.setOpaque(false);
+        JLabel lblDel = new JLabel("Delete Node:");
+        lblDel.setFont(Theme.FONT_BODY);
+        lblDel.setForeground(Theme.TEXT_SECONDARY);
+        deleteNodeRow.add(lblDel);
         deleteNodeRow.add(cmbDeleteNode);
-        JButton btnDeleteNode = new JButton("Delete Node");
-        btnDeleteNode.setForeground(new Color(180, 40, 50));
+
+        JButton btnDeleteNode = Theme.createButton("Delete Node", Theme.ButtonStyle.DESTRUCTIVE);
         deleteNodeRow.add(btnDeleteNode);
 
         btnDeleteNode.addActionListener(e -> {
@@ -359,21 +410,21 @@ public class ControlPanel extends JPanel {
         });
 
         panel.add(nodeRow);
+        panel.add(Box.createRigidArea(new Dimension(0, 4)));
         panel.add(connectGrid);
         panel.add(costRow);
+        panel.add(Box.createRigidArea(new Dimension(0, 4)));
         panel.add(deleteNodeRow);
         return panel;
     }
 
     private JPanel createSimulationActionPanel() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 4));
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createTitledBorder("Simulation Controls"),
-                BorderFactory.createEmptyBorder(2, 8, 4, 8)
-        ));
+        panel.setBackground(Theme.BG_PANEL);
+        panel.setBorder(Theme.createTitledBorder("Simulation Controls"));
 
-        JButton btnStep = new JButton("Step 1 Tick");
-        JButton btnReset = new JButton("Reset Sample Network");
+        JButton btnStep = Theme.createButton("Step 1 Tick", Theme.ButtonStyle.SECONDARY);
+        JButton btnReset = Theme.createButton("Reset Sample Network", Theme.ButtonStyle.SECONDARY);
 
         btnStep.addActionListener(e -> {
             if (listener != null) {

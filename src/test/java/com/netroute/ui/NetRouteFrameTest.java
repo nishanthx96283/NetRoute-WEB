@@ -156,4 +156,147 @@ class NetRouteFrameTest {
 
         frame.dispose();
     }
+
+    @Test
+    void netRouteFrameNavigatesBetweenLandingAndSimulator() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        assertEquals(NetRouteFrame.CARD_LANDING, frame.getCurrentCard());
+
+        frame.showSimulatorPage();
+        assertEquals(NetRouteFrame.CARD_SIMULATOR, frame.getCurrentCard());
+
+        frame.showLandingPage();
+        assertEquals(NetRouteFrame.CARD_LANDING, frame.getCurrentCard());
+
+        frame.onLaunchSimulator();
+        assertEquals(NetRouteFrame.CARD_SIMULATOR, frame.getCurrentCard());
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameNavigatesToTechStackAndAbout() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        frame.showTechStackPage();
+        assertEquals(NetRouteFrame.CARD_TECH_STACK, frame.getCurrentCard());
+
+        frame.showAboutPage();
+        assertEquals(NetRouteFrame.CARD_ABOUT, frame.getCurrentCard());
+
+        frame.onShowTechStack();
+        assertEquals(NetRouteFrame.CARD_TECH_STACK, frame.getCurrentCard());
+
+        frame.onShowAbout();
+        assertEquals(NetRouteFrame.CARD_ABOUT, frame.getCurrentCard());
+
+        frame.showLandingPage();
+        assertEquals(NetRouteFrame.CARD_LANDING, frame.getCurrentCard());
+
+        frame.dispose();
+    }
+
+    @Test
+    void landingPageInitializesCorrectly() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        LandingPage.Listener listener = new LandingPage.Listener() {
+            @Override
+            public void onLaunchSimulator() {}
+            @Override
+            public void onShowTechStack() {}
+            @Override
+            public void onShowAbout() {}
+        };
+        LandingPage page = new LandingPage(listener);
+        assertNotNull(page);
+        page.setSize(1280, 800);
+        page.doLayout();
+
+        // Recursively inspect text components on LandingPage to confirm Database exists,
+        // Interactive Workspace is removed, and Planned Enhancement badge is removed
+        boolean foundDatabase = false;
+        boolean foundInteractiveWorkspace = false;
+        boolean foundPlannedBadge = false;
+        java.util.Queue<java.awt.Component> queue = new java.util.LinkedList<>();
+        queue.add(page);
+        while (!queue.isEmpty()) {
+            java.awt.Component c = queue.poll();
+            if (c instanceof javax.swing.JLabel) {
+                String text = ((javax.swing.JLabel) c).getText();
+                if (text != null) {
+                    if (text.contains("Database")) foundDatabase = true;
+                    if (text.contains("Interactive Workspace")) foundInteractiveWorkspace = true;
+                    if (text.contains("Planned Enhancement")) foundPlannedBadge = true;
+                }
+            } else if (c instanceof javax.swing.JButton) {
+                String text = ((javax.swing.JButton) c).getText();
+                if (text != null && text.contains("Workspace")) foundInteractiveWorkspace = true;
+            }
+            if (c instanceof java.awt.Container) {
+                for (java.awt.Component child : ((java.awt.Container) c).getComponents()) {
+                    queue.add(child);
+                }
+            }
+        }
+        assertTrue(foundDatabase, "LandingPage must contain the Database card");
+        assertFalse(foundInteractiveWorkspace, "LandingPage must not contain Interactive Workspace card");
+        assertFalse(foundPlannedBadge, "LandingPage must not contain Planned Enhancement badge");
+    }
+
+    @Test
+    void techStackAndAboutPagesInitializeCorrectly() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        TechStackPage.NavigationHandler techNav = new TechStackPage.NavigationHandler() {
+            @Override
+            public void onBackToHome() {}
+            @Override
+            public void onLaunchSimulator() {}
+        };
+        TechStackPage techPage = new TechStackPage(techNav);
+        assertNotNull(techPage);
+
+        AboutPage.NavigationHandler aboutNav = new AboutPage.NavigationHandler() {
+            @Override
+            public void onBackToHome() {}
+            @Override
+            public void onLaunchSimulator() {}
+        };
+        AboutPage aboutPage = new AboutPage(aboutNav);
+        assertNotNull(aboutPage);
+        aboutPage.setSize(1280, 800);
+        aboutPage.doLayout();
+
+        // Verify top-level structure: North header and Center scroll pane
+        assertEquals(2, aboutPage.getComponentCount());
+        assertTrue(aboutPage.getComponent(1) instanceof javax.swing.JScrollPane);
+        javax.swing.JScrollPane scrollPane = (javax.swing.JScrollPane) aboutPage.getComponent(1);
+        javax.swing.JPanel scrollContent = (javax.swing.JPanel) scrollPane.getViewport().getView();
+        assertNotNull(scrollContent);
+
+        // Verify all direct children of scrollContent share consistent left alignment
+        for (int i = 0; i < scrollContent.getComponentCount(); i++) {
+            java.awt.Component child = scrollContent.getComponent(i);
+            assertEquals(java.awt.Component.LEFT_ALIGNMENT, child.getAlignmentX(),
+                    "Child at index " + i + " must have LEFT_ALIGNMENT");
+        }
+    }
 }
