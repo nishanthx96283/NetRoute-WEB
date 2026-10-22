@@ -28,6 +28,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
@@ -40,6 +41,7 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
+import java.sql.SQLException;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -86,6 +88,12 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
     private boolean skipConfirmationForTesting = false;
 
+    // Simulation run persistence tracking
+    private Integer activeTopologyId = null;
+    private String activeTopologyName = "Sample Campus Network";
+    private boolean currentRunSaved = false;
+    private Integer lastSavedRunId = null;
+
     public NetRouteFrame() {
         super("NetRoute - Network Traffic & Routing Simulator");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -113,6 +121,10 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         this.router = new DijkstraRouter();
         this.engine = new SimulationEngine(network, router);
         this.storageService = new TopologyStorageService();
+        this.activeTopologyId = null;
+        this.activeTopologyName = "Sample Campus Network";
+        this.currentRunSaved = false;
+        this.lastSavedRunId = null;
     }
 
     private void initComponents() {
@@ -425,6 +437,8 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         itemRandomize.addActionListener(e -> onRandomizeLinkCosts());
         JMenuItem itemStep = createStyledMenuItem("Step Simulation (1 Tick)");
         itemStep.addActionListener(e -> onStepSimulation());
+        JMenuItem itemFinishRun = createStyledMenuItem("📊 Finish & Save Simulation Run...");
+        itemFinishRun.addActionListener(e -> onFinishAndSaveRun());
         JMenuItem itemClearLog = createStyledMenuItem("Clear Log");
         itemClearLog.addActionListener(e -> {
             if (logArea != null) {
@@ -433,6 +447,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         });
         menuSim.add(itemRandomize);
         menuSim.add(itemStep);
+        menuSim.add(itemFinishRun);
         menuSim.add(itemClearLog);
 
         JMenu menuHelp = createStyledMenu("Help");
@@ -562,6 +577,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
     @Override
     public void onSendPacket(String sourceId, String destinationId) {
+        this.currentRunSaved = false;
         topologyPanel.setSelectedEndpoints(sourceId, destinationId);
         setStatusBadge("Transmitting", Theme.STATUS_WARNING);
 
@@ -602,6 +618,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
     @Override
     public void onStepSimulation() {
+        this.currentRunSaved = false;
         long prevTick = engine.getCurrentTime();
         engine.step();
         long newTick = engine.getCurrentTime();
@@ -664,6 +681,12 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
     @Override
     public void onRandomizeLinkCosts() {
+        if (this.activeTopologyId != null) {
+            this.activeTopologyId = null;
+            if (this.activeTopologyName != null && !this.activeTopologyName.endsWith("(Randomized Costs)")) {
+                this.activeTopologyName = this.activeTopologyName + " (Randomized Costs)";
+            }
+        }
         graphManager.randomizeLinkCosts();
         controlPanel.populateLinks(network);
         topologyPanel.repaint();
@@ -683,6 +706,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     public void onAddNode(NodeType type) {
         try {
             NetworkNode node = graphManager.addDynamicNode(type);
+            markTopologyModified();
             controlPanel.populate(network);
             topologyPanel.repaint();
             statisticsPanel.updateStatistics(new NetworkStatistics(engine));
@@ -700,6 +724,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     public void onConnectNodes(String sourceId, String destinationId, double cost) {
         try {
             NetworkLink link = graphManager.connectNodes(sourceId, destinationId, cost);
+            markTopologyModified();
             engine.queueFor(link.getId());
 
             controlPanel.populateLinks(network);
@@ -763,6 +788,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         }
         engine.removeNode(id);
         graphManager.removeNode(id);
+        markTopologyModified();
 
         controlPanel.populate(network);
         topologyPanel.repaint();
@@ -807,6 +833,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
         engine.removeLink(id);
         graphManager.removeLink(id);
+        markTopologyModified();
 
         controlPanel.populateLinks(network);
         topologyPanel.repaint();
@@ -916,6 +943,8 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         }
         try {
             int topologyId = storageService.saveTopology(name, description, network, overwrite);
+            this.activeTopologyId = topologyId;
+            this.activeTopologyName = name;
             String action = overwrite ? "overwritten" : "saved";
             String successMsg = "Topology '" + name + "' successfully " + action + " to database!\n"
                     + "Database ID: " + topologyId + "\n"
@@ -1029,6 +1058,10 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
             this.network = loadedNetwork;
             this.router = new DijkstraRouter();
             this.engine = new SimulationEngine(this.network, this.router);
+            this.activeTopologyId = id;
+            this.activeTopologyName = saved.getName();
+            this.currentRunSaved = false;
+            this.lastSavedRunId = null;
 
             this.topologyPanel.setNetwork(this.network);
             this.topologyPanel.clearHighlightedRoute();
@@ -1092,6 +1125,10 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         try {
             boolean deleted = storageService.deleteTopologyPermanently(id);
             if (deleted) {
+                if (this.activeTopologyId != null && this.activeTopologyId.equals(id)) {
+                    this.activeTopologyId = null;
+                    this.activeTopologyName = name + " (Deleted from DB)";
+                }
                 log(String.format("[Database Delete] Topology '%s' (ID: %d) permanently deleted from database.", name, id));
                 setStatusBadge("Topology Deleted", Theme.STATUS_WARNING);
                 if (historyPage != null) {
@@ -1131,6 +1168,216 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
             setStatusBadge("Delete Error", Theme.STATUS_ERROR);
             return false;
         }
+    }
+
+    private void markTopologyModified() {
+        this.activeTopologyId = null;
+        if (this.activeTopologyName != null && !this.activeTopologyName.endsWith("(Modified)")) {
+            this.activeTopologyName = this.activeTopologyName + " (Modified)";
+        }
+    }
+
+    @Override
+    public void onFinishAndSaveRun() {
+        promptAndSaveSimulationRun(null);
+    }
+
+    public boolean promptAndSaveSimulationRun(String initialNotes) {
+        if (storageService == null) {
+            log("[Database Error] Storage service not initialized.");
+            return false;
+        }
+
+        if (engine.getPackets().isEmpty() && engine.getCurrentTime() == 0) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "No simulation activity to save.\nPlease send packets or step the simulation first.",
+                        "No Simulation Activity",
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            }
+            log("[Simulation] Save run skipped: no simulation activity recorded.");
+            return false;
+        }
+
+        if (currentRunSaved) {
+            String msg = "The current simulation run has already been saved to the database"
+                    + (lastSavedRunId != null ? " (Run ID: #" + lastSavedRunId + ")" : "")
+                    + ".\n\nTo save a new run, send more packets or advance simulation ticks.";
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        msg,
+                        "Run Already Saved",
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            }
+            log("[Simulation] Duplicate save prevented: run was already saved (Run ID: " + lastSavedRunId + ").");
+            return false;
+        }
+
+        String notes = initialNotes != null ? initialNotes : "";
+        if (!skipConfirmationForTesting) {
+            NetworkStatistics currentStats = new NetworkStatistics(engine);
+            JPanel panel = new JPanel();
+            panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+
+            JLabel lblInfo = new JLabel(String.format(
+                    "<html><b>Topology:</b> %s %s<br/>"
+                            + "<b>Simulation Ticks:</b> %d<br/>"
+                            + "<b>Packets:</b> %d (Delivered: %d, Failed: %d, Dropped: %d)<br/>"
+                            + "<b>Delivery Ratio:</b> %.1f%% &nbsp;|&nbsp; <b>Avg Delay:</b> %.2f ticks<br/>"
+                            + "<b>Link Failures:</b> %d &nbsp;|&nbsp; <b>Reroutes:</b> %d</html>",
+                    activeTopologyName != null ? activeTopologyName : "Unsaved Network",
+                    activeTopologyId != null ? "(ID #" + activeTopologyId + ")" : "(Unsaved)",
+                    engine.getCurrentTime(),
+                    currentStats.getTotalPackets(),
+                    currentStats.getDeliveredCount(),
+                    currentStats.getFailedCount(),
+                    currentStats.getDroppedCount(),
+                    currentStats.getDeliveryRatio(),
+                    currentStats.getAverageDeliveryDelay(),
+                    currentStats.getLinkFailureCount(),
+                    currentStats.getTotalReroutes()
+            ));
+            lblInfo.setFont(Theme.FONT_BODY);
+
+            JLabel lblNotes = new JLabel("Run Notes / Scenario Description (optional):");
+            lblNotes.setFont(Theme.FONT_BODY_BOLD);
+            lblNotes.setBorder(BorderFactory.createEmptyBorder(8, 0, 4, 0));
+
+            JTextField txtNotes = new JTextField(notes, 24);
+            Theme.styleTextField(txtNotes);
+
+            panel.add(lblInfo);
+            panel.add(lblNotes);
+            panel.add(txtNotes);
+
+            int choice = JOptionPane.showConfirmDialog(
+                    this,
+                    panel,
+                    "Finish & Save Simulation Run to Database",
+                    JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.PLAIN_MESSAGE
+            );
+
+            if (choice != JOptionPane.OK_OPTION) {
+                log("[Simulation] Save run cancelled by user.");
+                return false;
+            }
+            notes = txtNotes.getText().trim();
+        }
+
+        return executeFinishAndSaveRun(notes);
+    }
+
+    public boolean executeFinishAndSaveRun(String notes) {
+        if (storageService == null) {
+            log("[Database Error] Storage service not initialized.");
+            return false;
+        }
+
+        if (engine.getPackets().isEmpty() && engine.getCurrentTime() == 0) {
+            log("[Simulation] Save run skipped: no simulation activity recorded.");
+            return false;
+        }
+
+        if (currentRunSaved) {
+            log("[Simulation] Duplicate save prevented: run was already saved (Run ID: " + lastSavedRunId + ").");
+            return false;
+        }
+
+        NetworkStatistics stats = new NetworkStatistics(engine);
+        long ticks = engine.getCurrentTime();
+        Integer topId = activeTopologyId;
+        String topName = (activeTopologyName != null && !activeTopologyName.trim().isEmpty())
+                ? activeTopologyName.trim()
+                : "Unsaved Network";
+
+        String safeNotes = notes != null ? notes.trim() : "";
+        if (safeNotes.length() > 255) {
+            safeNotes = safeNotes.substring(0, 255);
+        }
+
+        try {
+            int runId = storageService.recordSimulationRun(topId, topName, stats, ticks, safeNotes);
+            if (runId > 0) {
+                this.currentRunSaved = true;
+                this.lastSavedRunId = runId;
+
+                String successMsg = String.format(
+                        "Simulation run successfully recorded to MySQL!\n\n"
+                                + "Run ID: #%d\n"
+                                + "Topology: %s %s\n"
+                                + "Simulation Ticks: %d\n"
+                                + "Packets: %d (Delivered: %d, Delivery Ratio: %.1f%%)\n"
+                                + "Avg Delay: %.2f ticks | Reroutes: %d",
+                        runId,
+                        topName,
+                        topId != null ? "(ID #" + topId + ")" : "(Unsaved)",
+                        ticks,
+                        stats.getTotalPackets(),
+                        stats.getDeliveredCount(),
+                        stats.getDeliveryRatio(),
+                        stats.getAverageDeliveryDelay(),
+                        stats.getTotalReroutes()
+                );
+
+                if (!skipConfirmationForTesting) {
+                    JOptionPane.showMessageDialog(
+                            this,
+                            successMsg,
+                            "Simulation Run Saved",
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
+                }
+
+                log(String.format("[Database] Simulation run #%d recorded for topology '%s' (Packets: %d, Delivered: %d, Delivery Ratio: %.1f%%).",
+                        runId, topName, stats.getTotalPackets(), stats.getDeliveredCount(), stats.getDeliveryRatio()));
+                setStatusBadge("Run #" + runId + " Saved", Theme.STATUS_SUCCESS);
+                return true;
+            } else {
+                throw new SQLException("Database returned non-positive run ID: " + runId);
+            }
+        } catch (Exception e) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Failed to record simulation run to MySQL database:\n" + e.getMessage()
+                                + "\n\nCurrent in-memory statistics are preserved. You may retry after verifying MySQL connection.",
+                        "Database Error",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+            log("[Database Error] Failed to record simulation run: " + e.getMessage());
+            setStatusBadge("Save Run Failed", Theme.STATUS_ERROR);
+            return false;
+        }
+    }
+
+    public Integer getActiveTopologyId() {
+        return activeTopologyId;
+    }
+
+    public void setActiveTopologyId(Integer activeTopologyId) {
+        this.activeTopologyId = activeTopologyId;
+    }
+
+    public String getActiveTopologyName() {
+        return activeTopologyName;
+    }
+
+    public void setActiveTopologyName(String activeTopologyName) {
+        this.activeTopologyName = activeTopologyName;
+    }
+
+    public boolean isCurrentRunSaved() {
+        return currentRunSaved;
+    }
+
+    public Integer getLastSavedRunId() {
+        return lastSavedRunId;
     }
 
     public HistoryPage getHistoryPage() {

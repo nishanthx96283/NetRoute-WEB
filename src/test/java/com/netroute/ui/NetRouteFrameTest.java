@@ -7,6 +7,7 @@ import com.netroute.model.Route;
 import com.netroute.repository.SavedTopology;
 import com.netroute.repository.SimulationRunRecord;
 import com.netroute.routing.DijkstraRouter;
+import com.netroute.service.TopologyStorageService;
 import com.netroute.simulation.SimulationEngine;
 import com.netroute.statistics.NetworkStatistics;
 import org.junit.jupiter.api.Test;
@@ -330,6 +331,7 @@ class NetRouteFrameTest {
             @Override public void onDeleteNode(String nodeId) {}
             @Override public void onDeleteLink(String linkId) {}
             @Override public void onSaveTopology() { called[0] = true; }
+            @Override public void onFinishAndSaveRun() {}
         });
 
         panel.triggerSaveTopology();
@@ -508,6 +510,305 @@ class NetRouteFrameTest {
                 }
             }
             assertTrue(foundRun, "Simulation run record must be retained in simulation_runs table after topology deletion");
+        }
+
+        frame.dispose();
+    }
+
+    @Test
+    void controlPanelIncludesFinishAndSaveRunButton() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        ControlPanel panel = new ControlPanel();
+        assertNotNull(panel.getBtnFinishRun(), "ControlPanel must have Finish & Save Run button");
+        assertTrue(panel.getBtnFinishRun().getText().contains("Finish & Save Run"));
+
+        boolean[] called = {false};
+        panel.setListener(new ControlPanel.Listener() {
+            @Override public void onFindRoute(String src, String dst) {}
+            @Override public void onSendPacket(String src, String dst) {}
+            @Override public void onStepSimulation() {}
+            @Override public void onFailLink(String linkId) {}
+            @Override public void onRestoreLink(String linkId) {}
+            @Override public void onResetNetwork() {}
+            @Override public void onRandomizeLinkCosts() {}
+            @Override public void onAddNode(NodeType type) {}
+            @Override public void onConnectNodes(String a, String b, double cost) {}
+            @Override public void onDeleteNode(String nodeId) {}
+            @Override public void onDeleteLink(String linkId) {}
+            @Override public void onSaveTopology() {}
+            @Override public void onFinishAndSaveRun() { called[0] = true; }
+        });
+
+        panel.triggerFinishAndSaveRun();
+        assertTrue(called[0], "triggerFinishAndSaveRun() must invoke onFinishAndSaveRun on listener");
+    }
+
+    @Test
+    void netRouteFrameRecordsCompletedSimulationRunForSavedTopology() throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            // 1. Build and save a custom 3-node network
+            Network testNet = new Network();
+            testNet.addNode(new com.netroute.model.Computer("RC_PC1", "Run PC", 100, 100));
+            testNet.addNode(new com.netroute.model.Router("RC_R1", "Run Router", 250, 150));
+            testNet.addNode(new com.netroute.model.Server("RC_S1", "Run Server", 400, 200));
+            testNet.addLink(new com.netroute.model.NetworkLink("RC_L1", "RC_PC1", "RC_R1", 2.0, 3.0, 10, false));
+            testNet.addLink(new com.netroute.model.NetworkLink("RC_L2", "RC_R1", "RC_S1", 1.0, 2.0, 10, false));
+
+            String topName = "RunTest_Saved_" + System.currentTimeMillis();
+            int topId = frame.getStorageService().saveTopology(topName, "Run test topology", testNet, false);
+            assertTrue(topId > 0);
+
+            // 2. Load into simulator
+            boolean loaded = frame.handleLoadTopology(topId, topName);
+            assertTrue(loaded);
+            assertEquals(topId, frame.getActiveTopologyId());
+            assertEquals(topName, frame.getActiveTopologyName());
+
+            // 3. Execute simulation events
+            frame.onSendPacket("RC_PC1", "RC_S1");
+            frame.onSendPacket("RC_PC1", "RC_S1");
+            frame.onFailLink("RC_L2");
+            frame.onStepSimulation();
+
+            // 4. Finish & Save Run
+            String notes = "Automated test scenario with 2 packets and 1 failure";
+            boolean savedRun = frame.executeFinishAndSaveRun(notes);
+            assertTrue(savedRun, "executeFinishAndSaveRun should succeed");
+            assertTrue(frame.isCurrentRunSaved(), "currentRunSaved must be true after saving");
+            assertNotNull(frame.getLastSavedRunId(), "lastSavedRunId must be non-null");
+
+            // 5. Query MySQL to verify exact persisted metrics
+            int runId = frame.getLastSavedRunId();
+            Optional<SimulationRunRecord> runOpt = frame.getStorageService().getRunById(runId);
+            assertTrue(runOpt.isPresent());
+            SimulationRunRecord record = runOpt.get();
+
+            assertEquals(topId, record.getTopologyId());
+            assertEquals(topName, record.getTopologyName());
+            assertEquals(2, record.getTotalPackets());
+            assertEquals(2, record.getDeliveredPackets());
+            assertEquals(0, record.getFailedPackets());
+            assertEquals(0, record.getDroppedPackets());
+            assertEquals(100.0, record.getDeliveryRatio(), 0.001);
+            assertTrue(record.getAvgDeliveryDelay() > 0.0);
+            assertEquals(1, record.getLinkFailures());
+            assertEquals(notes, record.getNotes());
+            assertTrue(record.getSimulationTicks() > 0);
+
+            // 6. Verify in-memory statistics are preserved
+            assertEquals(2, frame.getEngine().getPackets().size());
+
+            // Cleanup
+            frame.getStorageService().deleteTopologyPermanently(topId);
+        }
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameHandlesUnsavedTopologyCorrectly() throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            // Default network is unsaved
+            frame.onResetNetwork();
+            assertNull(frame.getActiveTopologyId(), "Active topology ID must be null for unsaved network");
+            assertEquals("Sample Campus Network", frame.getActiveTopologyName());
+
+            // Submit packet
+            frame.onSendPacket("PC1", "S1");
+            assertEquals(1, frame.getEngine().getPackets().size());
+
+            // Finish & Save run
+            boolean saved = frame.executeFinishAndSaveRun("Unsaved run test");
+            assertTrue(saved);
+            assertTrue(frame.isCurrentRunSaved());
+            assertNotNull(frame.getLastSavedRunId());
+
+            // Verify run in database has null topology_id and accurate name snapshot
+            Optional<SimulationRunRecord> runOpt = frame.getStorageService().getRunById(frame.getLastSavedRunId());
+            assertTrue(runOpt.isPresent());
+            SimulationRunRecord record = runOpt.get();
+
+            assertNull(record.getTopologyId(), "Unsaved network run must store NULL topology_id");
+            assertEquals("Sample Campus Network", record.getTopologyName());
+            assertEquals(1, record.getTotalPackets());
+            assertEquals("Unsaved run test", record.getNotes());
+        }
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFramePreventsDuplicateRunSaves() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            frame.onResetNetwork();
+            frame.onSendPacket("PC1", "S1");
+
+            // First save: succeeds
+            boolean firstSave = frame.executeFinishAndSaveRun("First save");
+            assertTrue(firstSave);
+            assertTrue(frame.isCurrentRunSaved());
+            int runId1 = frame.getLastSavedRunId();
+
+            // Second save without new simulation events: blocked!
+            boolean duplicateSave = frame.executeFinishAndSaveRun("Duplicate attempt");
+            assertFalse(duplicateSave, "Repeated save without new events must be rejected");
+
+            boolean duplicatePrompt = frame.promptAndSaveSimulationRun("Prompt duplicate attempt");
+            assertFalse(duplicatePrompt, "Prompt save without new events must be rejected");
+
+            // Generate new simulation activity
+            frame.onSendPacket("PC2", "S1");
+            assertFalse(frame.isCurrentRunSaved(), "currentRunSaved must reset to false upon new packet submission");
+
+            // Now save succeeds for updated state
+            boolean thirdSave = frame.executeFinishAndSaveRun("Extended run save");
+            assertTrue(thirdSave);
+            assertTrue(frame.getLastSavedRunId() > runId1);
+        }
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameAllowsRetryAfterFailedDatabaseWrite() throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        TopologyStorageService realService = frame.getStorageService();
+        if (realService.isDatabaseAvailable()) {
+            frame.onResetNetwork();
+            frame.onSendPacket("PC1", "S1");
+
+            // Subclass that simulates MySQL failure
+            TopologyStorageService failingService = new TopologyStorageService() {
+                private boolean failing = true;
+
+                @Override
+                public int recordSimulationRun(Integer topId, String topName, NetworkStatistics stats, long ticks, String notes) throws java.sql.SQLException {
+                    if (failing) {
+                        throw new java.sql.SQLException("Simulated database outage");
+                    }
+                    return realService.recordSimulationRun(topId, topName, stats, ticks, notes);
+                }
+            };
+
+            frame.setStorageService(failingService);
+
+            // Attempt save during outage: fails cleanly
+            boolean failedAttempt = frame.executeFinishAndSaveRun("Failing attempt");
+            assertFalse(failedAttempt, "Save should fail when database throws SQLException");
+            assertFalse(frame.isCurrentRunSaved(), "currentRunSaved must remain false on failure");
+            assertEquals(1, frame.getEngine().getPackets().size(), "In-memory packets must be preserved on failure");
+
+            // Restore connection and retry: succeeds
+            frame.setStorageService(realService);
+            boolean retryAttempt = frame.executeFinishAndSaveRun("Successful retry");
+            assertTrue(retryAttempt, "Retry must succeed after database connection is restored");
+            assertTrue(frame.isCurrentRunSaved());
+            assertNotNull(frame.getLastSavedRunId());
+        }
+
+        frame.dispose();
+    }
+
+    @Test
+    void resettingOrLoadingTopologyDoesNotCreateDuplicateOrAccidentalRun() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        // 1. Initial state without simulation activity cannot be saved
+        boolean emptySave = frame.executeFinishAndSaveRun("Blank");
+        assertFalse(emptySave, "Empty simulation with 0 packets and 0 ticks must not be saved");
+
+        // 2. Submit packet, then reset network
+        frame.onSendPacket("PC1", "S1");
+        frame.onResetNetwork();
+
+        // 3. Clean network must not auto-save anything and cannot be saved with 0 activity
+        assertFalse(frame.isCurrentRunSaved());
+        assertEquals(0, frame.getEngine().getPackets().size());
+        boolean afterResetSave = frame.executeFinishAndSaveRun("After reset");
+        assertFalse(afterResetSave, "Fresh network after reset cannot be saved with 0 activity");
+
+        frame.dispose();
+    }
+
+    @Test
+    void modifiedTopologyDisassociatesFromSavedTopologyId() throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            Network net = new Network();
+            net.addNode(new com.netroute.model.Computer("MC1", "Mod PC", 100, 100));
+            net.addNode(new com.netroute.model.Server("MS1", "Mod Server", 300, 200));
+            net.addLink(new com.netroute.model.NetworkLink("ML1", "MC1", "MS1", 1.0, 2.0, 10, false));
+
+            String topName = "ModTest_" + System.currentTimeMillis();
+            int topId = frame.getStorageService().saveTopology(topName, "To be modified", net, false);
+
+            frame.handleLoadTopology(topId, topName);
+            assertEquals(topId, frame.getActiveTopologyId());
+
+            // Modify topology dynamically by adding a node
+            frame.onAddNode(NodeType.COMPUTER);
+            assertNull(frame.getActiveTopologyId(), "Active topology ID must become null when topology is modified");
+            assertTrue(frame.getActiveTopologyName().contains("(Modified)"));
+
+            // Run simulation on modified topology
+            frame.onSendPacket("MC1", "MS1");
+            boolean saved = frame.executeFinishAndSaveRun("Run on modified network");
+            assertTrue(saved);
+
+            Optional<SimulationRunRecord> runOpt = frame.getStorageService().getRunById(frame.getLastSavedRunId());
+            assertTrue(runOpt.isPresent());
+            assertNull(runOpt.get().getTopologyId(), "Modified network run must NOT be associated with original topology ID");
+            assertTrue(runOpt.get().getTopologyName().contains("(Modified)"));
+
+            // Cleanup
+            frame.getStorageService().deleteTopologyPermanently(topId);
         }
 
         frame.dispose();

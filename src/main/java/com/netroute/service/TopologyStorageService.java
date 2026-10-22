@@ -164,4 +164,18 @@ public class TopologyStorageService {
     public List<SimulationRunRecord> listRecentRuns(int limit) throws SQLException {
         return historyRepository.listRecentRuns(limit);
     }
+
+    /**
+     * Retrieves a single simulation run record by its ID.
+     */
+    public Optional<SimulationRunRecord> getRunById(int runId) throws SQLException {
+        return historyRepository.getRunById(runId);
+    }
+
+    /**
+     * Deletes a specific simulation run record.
+     */
+    public boolean deleteRun(int runId) throws SQLException {
+        return historyRepository.deleteRun(runId);
+    }
 }

@@ -43,6 +43,7 @@ public class ControlPanel extends JPanel {
         void onDeleteNode(String nodeId);
         void onDeleteLink(String linkId);
         void onSaveTopology();
+        void onFinishAndSaveRun();
     }
 
     private final JComboBox<String> cmbSource = new JComboBox<>();
@@ -420,15 +421,17 @@ public class ControlPanel extends JPanel {
     }
 
     private JButton btnSaveTopology;
+    private JButton btnFinishRun;
 
     private JPanel createSimulationActionPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 4));
+        JPanel panel = new JPanel(new GridLayout(2, 2, 8, 6));
         panel.setBackground(Theme.BG_PANEL);
         panel.setBorder(Theme.createTitledBorder("Simulation & Persistence Controls"));
 
         JButton btnStep = Theme.createButton("Step 1 Tick", Theme.ButtonStyle.SECONDARY);
         JButton btnReset = Theme.createButton("Reset Network", Theme.ButtonStyle.SECONDARY);
         btnSaveTopology = Theme.createButton("💾 Save Topology", Theme.ButtonStyle.PRIMARY);
+        btnFinishRun = Theme.createButton("📊 Finish & Save Run", Theme.ButtonStyle.SUCCESS);
 
         btnStep.addActionListener(e -> {
             if (listener != null) {
@@ -448,9 +451,16 @@ public class ControlPanel extends JPanel {
             }
         });
 
+        btnFinishRun.addActionListener(e -> {
+            if (listener != null) {
+                listener.onFinishAndSaveRun();
+            }
+        });
+
         panel.add(btnStep);
         panel.add(btnReset);
         panel.add(btnSaveTopology);
+        panel.add(btnFinishRun);
         return panel;
     }
 
@@ -461,6 +471,16 @@ public class ControlPanel extends JPanel {
     public void triggerSaveTopology() {
         if (listener != null) {
             listener.onSaveTopology();
+        }
+    }
+
+    public JButton getBtnFinishRun() {
+        return btnFinishRun;
+    }
+
+    public void triggerFinishAndSaveRun() {
+        if (listener != null) {
+            listener.onFinishAndSaveRun();
         }
     }
 
