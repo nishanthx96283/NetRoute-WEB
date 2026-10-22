@@ -8,7 +8,9 @@ import com.netroute.model.NodeType;
 import com.netroute.model.Packet;
 import com.netroute.model.PacketStatus;
 import com.netroute.model.Route;
+import com.netroute.repository.DuplicateTopologyNameException;
 import com.netroute.routing.DijkstraRouter;
+import com.netroute.service.TopologyStorageService;
 import com.netroute.simulation.SimulationEngine;
 import com.netroute.statistics.NetworkStatistics;
 
@@ -57,6 +59,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     public static final String CARD_SIMULATOR = "SIMULATOR";
     public static final String CARD_TECH_STACK = "TECH_STACK";
     public static final String CARD_ABOUT = "ABOUT";
+    public static final String CARD_HISTORY = "HISTORY";
 
     private final CardLayout cardLayout = new CardLayout();
     private final JPanel rootPanel = new JPanel(cardLayout);
@@ -67,11 +70,13 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     private Network network;
     private DijkstraRouter router;
     private SimulationEngine engine;
+    private TopologyStorageService storageService;
 
     // UI Components
     private LandingPage landingPage;
     private TechStackPage techStackPage;
     private AboutPage aboutPage;
+    private HistoryPage historyPage;
     private JPanel simulatorView;
     private TopologyPanel topologyPanel;
     private ControlPanel controlPanel;
@@ -107,6 +112,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         this.network = graphManager.getNetwork();
         this.router = new DijkstraRouter();
         this.engine = new SimulationEngine(network, router);
+        this.storageService = new TopologyStorageService();
     }
 
     private void initComponents() {
@@ -147,7 +153,32 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         aboutPage = new AboutPage(aboutNav);
         rootPanel.add(aboutPage, CARD_ABOUT);
 
-        // 4. Simulator Page Card
+        // 4. History Page Card
+        HistoryPage.Listener historyNav = new HistoryPage.Listener() {
+            @Override
+            public void onBackToHome() {
+                showLandingPage();
+            }
+
+            @Override
+            public void onLaunchSimulator() {
+                showSimulatorPage();
+            }
+
+            @Override
+            public void onLoadTopology(com.netroute.repository.TopologySummary summary) {
+                handleLoadTopology(summary.getId(), summary.getName());
+            }
+
+            @Override
+            public void onDeleteTopology(com.netroute.repository.TopologySummary summary) {
+                handleDeleteTopology(summary.getId(), summary.getName());
+            }
+        };
+        historyPage = new HistoryPage(storageService, historyNav);
+        rootPanel.add(historyPage, CARD_HISTORY);
+
+        // 5. Simulator Page Card
         simulatorView = createSimulatorView();
         rootPanel.add(simulatorView, CARD_SIMULATOR);
 
@@ -284,12 +315,24 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         btnHome.setFont(Theme.FONT_SMALL);
         btnHome.addActionListener(e -> showLandingPage());
 
+        JButton btnSaveTop = Theme.createButton("💾 Save Topology", Theme.ButtonStyle.PRIMARY);
+        btnSaveTop.setPreferredSize(new Dimension(135, 30));
+        btnSaveTop.setFont(Theme.FONT_SMALL);
+        btnSaveTop.addActionListener(e -> onSaveTopology());
+
+        JButton btnHistory = Theme.createButton("📂 History", Theme.ButtonStyle.SECONDARY);
+        btnHistory.setPreferredSize(new Dimension(100, 30));
+        btnHistory.setFont(Theme.FONT_SMALL);
+        btnHistory.addActionListener(e -> showHistoryPage());
+
         JButton btnReset = Theme.createButton("Reset Network", Theme.ButtonStyle.OUTLINE);
         btnReset.setPreferredSize(new Dimension(115, 30));
         btnReset.setFont(Theme.FONT_SMALL);
         btnReset.addActionListener(e -> onResetNetwork());
 
         right.add(lblStatusBadge);
+        right.add(btnSaveTop);
+        right.add(btnHistory);
         right.add(btnReset);
         right.add(btnHome);
 
@@ -353,10 +396,14 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         itemHome.addActionListener(e -> showLandingPage());
         JMenuItem itemSimulator = createStyledMenuItem("Network Simulator");
         itemSimulator.addActionListener(e -> showSimulatorPage());
+        JMenuItem itemHistory = createStyledMenuItem("📂 Saved Topologies & History");
+        itemHistory.addActionListener(e -> showHistoryPage());
         JMenuItem itemTechStack = createStyledMenuItem("Tech Stack & Architecture");
         itemTechStack.addActionListener(e -> showTechStackPage());
         JMenuItem itemAboutFile = createStyledMenuItem("About NetRoute");
         itemAboutFile.addActionListener(e -> showAboutPage());
+        JMenuItem itemSave = createStyledMenuItem("💾 Save Topology to Database...");
+        itemSave.addActionListener(e -> onSaveTopology());
         JMenuItem itemReset = createStyledMenuItem("Reset Sample Network");
         itemReset.addActionListener(e -> onResetNetwork());
         JMenuItem itemExit = createStyledMenuItem("Exit");
@@ -364,6 +411,8 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
         menuFile.add(itemHome);
         menuFile.add(itemSimulator);
+        menuFile.add(itemHistory);
+        menuFile.add(itemSave);
         menuFile.add(itemTechStack);
         menuFile.add(itemAboutFile);
         menuFile.addSeparator();
@@ -437,6 +486,14 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         this.currentCard = CARD_ABOUT;
     }
 
+    public void showHistoryPage() {
+        cardLayout.show(rootPanel, CARD_HISTORY);
+        this.currentCard = CARD_HISTORY;
+        if (historyPage != null) {
+            historyPage.refresh();
+        }
+    }
+
     public String getCurrentCard() {
         return currentCard;
     }
@@ -454,6 +511,11 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     @Override
     public void onShowAbout() {
         showAboutPage();
+    }
+
+    @Override
+    public void onShowHistory() {
+        showHistoryPage();
     }
 
     private void setStatusBadge(String text, Color color) {
@@ -659,7 +721,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         }
     }
 
-    void setSkipConfirmationForTesting(boolean skip) {
+    public void setSkipConfirmationForTesting(boolean skip) {
         this.skipConfirmationForTesting = skip;
     }
 
@@ -773,6 +835,333 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         log("--------------------------------------------------");
         log("[Reset] Network reloaded with clean sample topology and new simulation engine.");
         setStatusBadge("Simulation Ready", Theme.STATUS_SUCCESS);
+    }
+
+    @Override
+    public void onSaveTopology() {
+        promptAndSaveTopology(null, null);
+    }
+
+    public boolean promptAndSaveTopology(String initialName, String initialDescription) {
+        if (storageService == null || !storageService.isDatabaseAvailable()) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Cannot connect to MySQL database.\n\n"
+                                + "Please verify that MySQL server is running on localhost:3306\n"
+                                + "and credentials in 'db.properties' are correct.\n"
+                                + "(Run DatabaseConnection diagnostic tool to test)",
+                        "Database Connection Error",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+            log("[Database Error] Save aborted: MySQL database is unreachable.");
+            return false;
+        }
+
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+
+        JLabel lblName = new JLabel("Topology Name (required):");
+        lblName.setFont(Theme.FONT_BODY_BOLD);
+        javax.swing.JTextField txtName = new javax.swing.JTextField(initialName != null ? initialName : "", 22);
+        Theme.styleTextField(txtName);
+
+        JLabel lblDesc = new JLabel("Description (optional):");
+        lblDesc.setFont(Theme.FONT_BODY_BOLD);
+        javax.swing.JTextField txtDesc = new javax.swing.JTextField(initialDescription != null ? initialDescription : "", 22);
+        Theme.styleTextField(txtDesc);
+
+        panel.add(lblName);
+        panel.add(Box.createRigidArea(new Dimension(0, 4)));
+        panel.add(txtName);
+        panel.add(Box.createRigidArea(new Dimension(0, 8)));
+        panel.add(lblDesc);
+        panel.add(Box.createRigidArea(new Dimension(0, 4)));
+        panel.add(txtDesc);
+
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                panel,
+                "Save Network Topology to Database",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE
+        );
+
+        if (result != JOptionPane.OK_OPTION) {
+            log("[Save Cancelled] Save topology operation cancelled by user.");
+            return false;
+        }
+
+        String name = txtName.getText().trim();
+        String desc = txtDesc.getText().trim();
+
+        if (name.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Topology name cannot be blank. Please enter a valid name.",
+                    "Validation Error",
+                    JOptionPane.WARNING_MESSAGE
+            );
+            return promptAndSaveTopology(null, desc);
+        }
+
+        return executeSaveTopology(name, desc, false);
+    }
+
+    public boolean executeSaveTopology(String name, String description, boolean overwrite) {
+        if (storageService == null) {
+            log("[Database Error] Storage service not initialized.");
+            return false;
+        }
+        try {
+            int topologyId = storageService.saveTopology(name, description, network, overwrite);
+            String action = overwrite ? "overwritten" : "saved";
+            String successMsg = "Topology '" + name + "' successfully " + action + " to database!\n"
+                    + "Database ID: " + topologyId + "\n"
+                    + "Nodes: " + network.nodeCount() + " | Links: " + network.linkCount();
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        successMsg,
+                        "Topology Saved",
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            }
+            log(String.format("[Database Save] Topology '%s' successfully %s (ID: %d, %d nodes, %d links).",
+                    name, action, topologyId, network.nodeCount(), network.linkCount()));
+            setStatusBadge("Topology Saved", Theme.STATUS_SUCCESS);
+            if (historyPage != null) {
+                historyPage.refresh();
+            }
+            return true;
+        } catch (DuplicateTopologyNameException e) {
+            if (skipConfirmationForTesting) {
+                log("[Duplicate Name] Test mode detected conflict for: " + name);
+                return false;
+            }
+            Object[] options = {"Overwrite", "Rename", "Cancel"};
+            int choice = JOptionPane.showOptionDialog(
+                    this,
+                    "A saved topology named '" + name + "' already exists in the database.\n\n"
+                            + "Choose an action:\n"
+                            + "• Overwrite — replaces nodes and links, keeping the existing ID and simulation history.\n"
+                            + "• Rename — enter another unique name.\n"
+                            + "• Cancel — discard this save operation.",
+                    "Topology Name Conflict",
+                    JOptionPane.DEFAULT_OPTION,
+                    JOptionPane.WARNING_MESSAGE,
+                    null,
+                    options,
+                    options[1]
+            );
+
+            if (choice == 0) { // Overwrite
+                int confirm = JOptionPane.showConfirmDialog(
+                        this,
+                        "Are you sure you want to overwrite topology '" + name + "'?\n"
+                                + "Existing nodes and links in database will be replaced.",
+                        "Confirm Overwrite",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE
+                );
+                if (confirm != JOptionPane.YES_OPTION) {
+                    log("[Save Cancelled] Overwrite of topology '" + name + "' cancelled by user.");
+                    return false;
+                }
+                return executeSaveTopology(name, description, true);
+            } else if (choice == 1) { // Rename
+                return promptAndSaveTopology(name + "_copy", description);
+            } else { // Cancel
+                log("[Save Cancelled] Save cancelled due to name conflict: " + name);
+                return false;
+            }
+        } catch (Exception e) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Failed to save topology to MySQL database:\n" + e.getMessage(),
+                        "Database Error",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+            log("[Database Error] Failed to save topology: " + e.getMessage());
+            setStatusBadge("Save Error", Theme.STATUS_ERROR);
+            return false;
+        }
+    }
+
+    public boolean handleLoadTopology(int id, String name) {
+        if (!skipConfirmationForTesting) {
+            int confirm = JOptionPane.showConfirmDialog(
+                    this,
+                    "Are you sure you want to load topology '" + name + "' (ID: " + id + ")?\n\n"
+                            + "This will replace the current network canvas and reset active packets and statistics.",
+                    "Confirm Load Topology",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE
+            );
+            if (confirm != JOptionPane.YES_OPTION) {
+                log("[Load Cancelled] Loading of topology '" + name + "' cancelled by user.");
+                return false;
+            }
+        }
+
+        try {
+            Optional<com.netroute.repository.SavedTopology> loadedOpt = storageService.loadTopology(id);
+            if (loadedOpt.isEmpty()) {
+                if (!skipConfirmationForTesting) {
+                    JOptionPane.showMessageDialog(
+                            this,
+                            "Topology with ID " + id + " was not found in the database.",
+                            "Load Failed",
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                }
+                log("[Database Error] Topology ID " + id + " not found.");
+                setStatusBadge("Load Error", Theme.STATUS_ERROR);
+                return false;
+            }
+
+            com.netroute.repository.SavedTopology saved = loadedOpt.get();
+            Network loadedNetwork = saved.getNetwork();
+
+            this.network = loadedNetwork;
+            this.router = new DijkstraRouter();
+            this.engine = new SimulationEngine(this.network, this.router);
+
+            this.topologyPanel.setNetwork(this.network);
+            this.topologyPanel.clearHighlightedRoute();
+            this.topologyPanel.setSelectedEndpoints(null, null);
+
+            this.controlPanel.populate(this.network);
+            this.controlPanel.setRouteResult("", false);
+
+            this.statisticsPanel.updateStatistics(new NetworkStatistics(this.engine));
+
+            showSimulatorPage();
+
+            String msg = String.format("Topology '%s' loaded successfully!\nNodes: %d | Links: %d",
+                    saved.getName(), this.network.nodeCount(), this.network.linkCount());
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        msg,
+                        "Topology Loaded",
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            }
+
+            log(String.format("[Database Load] Topology '%s' (ID: %d) successfully loaded (%d nodes, %d links).",
+                    saved.getName(), id, this.network.nodeCount(), this.network.linkCount()));
+            setStatusBadge("Topology Loaded", Theme.STATUS_SUCCESS);
+            return true;
+        } catch (Exception e) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Failed to load topology from database:\n" + e.getMessage(),
+                        "Database Error",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+            log("[Database Error] Failed to load topology ID " + id + ": " + e.getMessage());
+            setStatusBadge("Load Error", Theme.STATUS_ERROR);
+            return false;
+        }
+    }
+
+    public boolean handleDeleteTopology(int id, String name) {
+        if (!skipConfirmationForTesting) {
+            int confirm = JOptionPane.showConfirmDialog(
+                    this,
+                    "Are you sure you want to permanently delete topology '" + name + "' (ID: " + id + ")?\n\n"
+                            + "• All associated nodes and links will be removed from the database.\n"
+                            + "• Past simulation run history and metrics will be preserved.\n\n"
+                            + "This action cannot be undone. Do you wish to proceed?",
+                    "Confirm Delete Topology",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE
+            );
+            if (confirm != JOptionPane.YES_OPTION) {
+                log("[Delete Cancelled] Deletion of topology '" + name + "' cancelled by user.");
+                return false;
+            }
+        }
+
+        try {
+            boolean deleted = storageService.deleteTopologyPermanently(id);
+            if (deleted) {
+                log(String.format("[Database Delete] Topology '%s' (ID: %d) permanently deleted from database.", name, id));
+                setStatusBadge("Topology Deleted", Theme.STATUS_WARNING);
+                if (historyPage != null) {
+                    historyPage.refresh();
+                }
+                if (!skipConfirmationForTesting) {
+                    JOptionPane.showMessageDialog(
+                            this,
+                            "Topology '" + name + "' (ID: " + id + ") has been permanently deleted from the database.",
+                            "Topology Deleted",
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
+                }
+                return true;
+            } else {
+                if (!skipConfirmationForTesting) {
+                    JOptionPane.showMessageDialog(
+                            this,
+                            "Topology '" + name + "' (ID: " + id + ") could not be deleted or was not found.",
+                            "Delete Failed",
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                }
+                log("[Database Warning] Topology ID " + id + " not found for deletion.");
+                return false;
+            }
+        } catch (Exception e) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Failed to delete topology from database:\n" + e.getMessage(),
+                        "Database Error",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+            log("[Database Error] Failed to delete topology ID " + id + ": " + e.getMessage());
+            setStatusBadge("Delete Error", Theme.STATUS_ERROR);
+            return false;
+        }
+    }
+
+    public HistoryPage getHistoryPage() {
+        return historyPage;
+    }
+
+    public boolean isSkipConfirmationForTesting() {
+        return skipConfirmationForTesting;
+    }
+
+    public Network getNetwork() {
+        return network;
+    }
+
+    public SimulationEngine getEngine() {
+        return engine;
+    }
+
+    public DijkstraRouter getRouter() {
+        return router;
+    }
+
+    public TopologyStorageService getStorageService() {
+        return storageService;
+    }
+
+    public void setStorageService(TopologyStorageService storageService) {
+        this.storageService = storageService;
+        if (this.historyPage != null) {
+            this.historyPage.setStorageService(storageService);
+        }
     }
 
     private void log(String message) {

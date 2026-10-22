@@ -42,6 +42,7 @@ public class ControlPanel extends JPanel {
         void onConnectNodes(String sourceId, String destinationId, double cost);
         void onDeleteNode(String nodeId);
         void onDeleteLink(String linkId);
+        void onSaveTopology();
     }
 
     private final JComboBox<String> cmbSource = new JComboBox<>();
@@ -418,13 +419,16 @@ public class ControlPanel extends JPanel {
         return panel;
     }
 
+    private JButton btnSaveTopology;
+
     private JPanel createSimulationActionPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 4));
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 4));
         panel.setBackground(Theme.BG_PANEL);
-        panel.setBorder(Theme.createTitledBorder("Simulation Controls"));
+        panel.setBorder(Theme.createTitledBorder("Simulation & Persistence Controls"));
 
         JButton btnStep = Theme.createButton("Step 1 Tick", Theme.ButtonStyle.SECONDARY);
-        JButton btnReset = Theme.createButton("Reset Sample Network", Theme.ButtonStyle.SECONDARY);
+        JButton btnReset = Theme.createButton("Reset Network", Theme.ButtonStyle.SECONDARY);
+        btnSaveTopology = Theme.createButton("💾 Save Topology", Theme.ButtonStyle.PRIMARY);
 
         btnStep.addActionListener(e -> {
             if (listener != null) {
@@ -438,9 +442,26 @@ public class ControlPanel extends JPanel {
             }
         });
 
+        btnSaveTopology.addActionListener(e -> {
+            if (listener != null) {
+                listener.onSaveTopology();
+            }
+        });
+
         panel.add(btnStep);
         panel.add(btnReset);
+        panel.add(btnSaveTopology);
         return panel;
+    }
+
+    public JButton getBtnSaveTopology() {
+        return btnSaveTopology;
+    }
+
+    public void triggerSaveTopology() {
+        if (listener != null) {
+            listener.onSaveTopology();
+        }
     }
 
     private static String extractLinkId(String text) {

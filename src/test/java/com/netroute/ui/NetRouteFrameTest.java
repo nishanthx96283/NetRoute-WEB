@@ -4,17 +4,21 @@ import com.netroute.graph.GraphManager;
 import com.netroute.graph.Network;
 import com.netroute.model.NodeType;
 import com.netroute.model.Route;
+import com.netroute.repository.SavedTopology;
+import com.netroute.repository.SimulationRunRecord;
 import com.netroute.routing.DijkstraRouter;
 import com.netroute.simulation.SimulationEngine;
 import com.netroute.statistics.NetworkStatistics;
 import org.junit.jupiter.api.Test;
 
 import java.awt.GraphicsEnvironment;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NetRouteFrameTest {
@@ -222,6 +226,8 @@ class NetRouteFrameTest {
             public void onShowTechStack() {}
             @Override
             public void onShowAbout() {}
+            @Override
+            public void onShowHistory() {}
         };
         LandingPage page = new LandingPage(listener);
         assertNotNull(page);
@@ -298,5 +304,212 @@ class NetRouteFrameTest {
             assertEquals(java.awt.Component.LEFT_ALIGNMENT, child.getAlignmentX(),
                     "Child at index " + i + " must have LEFT_ALIGNMENT");
         }
+    }
+
+    @Test
+    void controlPanelIncludesSaveTopologyButton() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        ControlPanel panel = new ControlPanel();
+        assertNotNull(panel.getBtnSaveTopology(), "ControlPanel must have Save Topology button");
+        assertTrue(panel.getBtnSaveTopology().getText().contains("Save Topology"));
+
+        boolean[] called = {false};
+        panel.setListener(new ControlPanel.Listener() {
+            @Override public void onFindRoute(String src, String dst) {}
+            @Override public void onSendPacket(String src, String dst) {}
+            @Override public void onStepSimulation() {}
+            @Override public void onFailLink(String linkId) {}
+            @Override public void onRestoreLink(String linkId) {}
+            @Override public void onResetNetwork() {}
+            @Override public void onRandomizeLinkCosts() {}
+            @Override public void onAddNode(NodeType type) {}
+            @Override public void onConnectNodes(String a, String b, double cost) {}
+            @Override public void onDeleteNode(String nodeId) {}
+            @Override public void onDeleteLink(String linkId) {}
+            @Override public void onSaveTopology() { called[0] = true; }
+        });
+
+        panel.triggerSaveTopology();
+        assertTrue(called[0], "triggerSaveTopology() must invoke onSaveTopology on listener");
+    }
+
+    @Test
+    void netRouteFrameExecutesSaveTopologyAndHandlesDuplicates() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            String testName = "FrameSaveTest_" + System.currentTimeMillis();
+
+            // 1. Initial save
+            boolean saved = frame.executeSaveTopology(testName, "Frame Test Desc", false);
+            assertTrue(saved, "Initial save should succeed");
+
+            // 2. Duplicate detection without overwrite
+            boolean duplicateAttempt = frame.executeSaveTopology(testName, "Duplicate Desc", false);
+            assertFalse(duplicateAttempt, "Duplicate name save without overwrite should be rejected");
+
+            // 3. Overwrite existing
+            boolean overwritten = frame.executeSaveTopology(testName, "Overwritten Desc", true);
+            assertTrue(overwritten, "Save with overwrite=true should succeed");
+
+            // Cleanup
+            try {
+                java.util.Optional<com.netroute.repository.SavedTopology> top =
+                        frame.getStorageService().loadTopologyByName(testName);
+                if (top.isPresent()) {
+                    frame.getStorageService().deleteTopologyPermanently(top.get().getId());
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        frame.dispose();
+    }
+
+    @Test
+    void historyPageNavigationSwitchesCurrentCard() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        assertNotNull(frame.getHistoryPage(), "Frame must initialize HistoryPage");
+        frame.showHistoryPage();
+        assertEquals(NetRouteFrame.CARD_HISTORY, frame.getCurrentCard());
+
+        frame.onShowHistory();
+        assertEquals(NetRouteFrame.CARD_HISTORY, frame.getCurrentCard());
+
+        frame.showLandingPage();
+        assertEquals(NetRouteFrame.CARD_LANDING, frame.getCurrentCard());
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameLoadsTopologyAndResetsSimulation() throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            // Build a distinct custom network with 3 nodes
+            Network customNet = new Network();
+            customNet.addNode(new com.netroute.model.Computer("C10", "Host 10", 100, 100));
+            customNet.addNode(new com.netroute.model.Router("R10", "Router 10", 250, 150));
+            customNet.addNode(new com.netroute.model.Server("S10", "Server 10", 400, 200));
+            customNet.addLink(new com.netroute.model.NetworkLink("L10A", "C10", "R10", 3.0, 5.0, 10, false));
+            customNet.addLink(new com.netroute.model.NetworkLink("L10B", "R10", "S10", 2.0, 4.0, 10, false));
+
+            String testName = "LoadTest_" + System.currentTimeMillis();
+            int topId = frame.getStorageService().saveTopology(testName, "Custom test topology", customNet, false);
+            assertTrue(topId > 0);
+
+            // Initially frame has 6 sample nodes
+            assertEquals(6, frame.getNetwork().nodeCount());
+
+            // Load the saved topology into simulator
+            boolean loaded = frame.handleLoadTopology(topId, testName);
+            assertTrue(loaded, "handleLoadTopology should return true");
+
+            // Verify network in simulator was replaced
+            assertEquals(NetRouteFrame.CARD_SIMULATOR, frame.getCurrentCard());
+            assertEquals(3, frame.getNetwork().nodeCount());
+            assertEquals(2, frame.getNetwork().linkCount());
+            assertTrue(frame.getNetwork().findNode("C10").isPresent());
+            assertTrue(frame.getNetwork().findNode("R10").isPresent());
+            assertTrue(frame.getNetwork().findNode("S10").isPresent());
+            assertFalse(frame.getNetwork().findNode("PC1").isPresent());
+
+            // Verify clean engine reset (no stale packets)
+            assertEquals(0, frame.getEngine().getSentCount());
+            assertTrue(frame.getEngine().getPackets().isEmpty());
+
+            // Verify routing still works on loaded network
+            Optional<Route> routeOpt = frame.getRouter().findRoute(frame.getNetwork(), "C10", "S10");
+            assertTrue(routeOpt.isPresent());
+            assertEquals(5.0, routeOpt.get().getTotalCost(), 0.001);
+
+            // Cleanup
+            frame.getStorageService().deleteTopologyPermanently(topId);
+        }
+
+        frame.dispose();
+    }
+
+    @Test
+    void netRouteFrameDeletesTopologyAndPreservesSimulationRuns() throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            Network tempNet = new Network();
+            tempNet.addNode(new com.netroute.model.Computer("D_PC1", "Delete PC", 150, 150));
+            tempNet.addNode(new com.netroute.model.Server("D_S1", "Delete Server", 350, 250));
+            tempNet.addLink(new com.netroute.model.NetworkLink("D_L1", "D_PC1", "D_S1", 1.0, 2.0, 10, false));
+
+            String testName = "DeleteTest_" + System.currentTimeMillis();
+            int topId = frame.getStorageService().saveTopology(testName, "Topology to delete", tempNet, false);
+
+            // Record a simulation run against this topology
+            SimulationEngine sim = new SimulationEngine(tempNet);
+            sim.submitPacket("D_PC1", "D_S1", 1);
+            sim.run();
+            NetworkStatistics stats = new NetworkStatistics(sim);
+            int runId = frame.getStorageService().recordSimulationRun(
+                    topId,
+                    testName,
+                    stats,
+                    10L,
+                    "Pre-deletion simulation run"
+            );
+            assertTrue(runId > 0);
+
+            // Delete topology via NetRouteFrame
+            boolean deleted = frame.handleDeleteTopology(topId, testName);
+            assertTrue(deleted, "handleDeleteTopology should return true");
+
+            // Verify topology is deleted from topologies table
+            Optional<SavedTopology> loaded = frame.getStorageService().loadTopology(topId);
+            assertTrue(loaded.isEmpty(), "Deleted topology should no longer exist in database");
+
+            // Verify history retention: simulation run still exists!
+            List<SimulationRunRecord> recentRuns = frame.getStorageService().listRecentRuns(20);
+            boolean foundRun = false;
+            for (SimulationRunRecord r : recentRuns) {
+                if (r.getId() == runId) {
+                    foundRun = true;
+                    // Topology name was denormalized and retained
+                    assertEquals(testName, r.getTopologyName());
+                    // Foreign key is now NULL because ON DELETE SET NULL was configured
+                    assertNull(r.getTopologyId(), "Run topology_id must be null after topology deletion");
+                    break;
+                }
+            }
+            assertTrue(foundRun, "Simulation run record must be retained in simulation_runs table after topology deletion");
+        }
+
+        frame.dispose();
     }
 }

@@ -31,6 +31,7 @@ public class LandingPage extends JPanel {
         void onLaunchSimulator();
         void onShowTechStack();
         void onShowAbout();
+        void onShowHistory();
     }
 
     private final Listener listener;
@@ -145,6 +146,13 @@ public class LandingPage extends JPanel {
             }
         });
 
+        JButton btnHistoryNav = createNavButton("History");
+        btnHistoryNav.addActionListener(e -> {
+            if (listener != null) {
+                listener.onShowHistory();
+            }
+        });
+
         JButton btnSimHeader = Theme.createButton("Launch Simulator", Theme.ButtonStyle.PRIMARY);
         btnSimHeader.setPreferredSize(new Dimension(145, 34));
         btnSimHeader.addActionListener(e -> {
@@ -154,6 +162,7 @@ public class LandingPage extends JPanel {
         });
 
         navPanel.add(btnAboutNav);
+        navPanel.add(btnHistoryNav);
         navPanel.add(Box.createRigidArea(new Dimension(8, 0)));
         navPanel.add(btnSimHeader);
 

@@ -1,0 +1,21 @@
+# ==============================================================================
+# NetRoute MySQL Configuration Template
+# ==============================================================================
+# INSTRUCTIONS:
+# 1. Copy this file to "db.properties" in the project root:
+#       cp db.properties.example db.properties   (or use Windows Copy/Paste)
+# 2. Update db.user and db.password with your local MySQL credentials.
+# 3. Note: "db.properties" is already listed in .gitignore and will never be
+#    committed to Git. Do NOT commit real credentials.
+# ==============================================================================
+
+# JDBC Connection URL
+# Includes SSL configuration, timezone, public key retrieval, and UTF-8 encoding
+db.url=jdbc:mysql://localhost:3306/netroute_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
+
+# MySQL Authentication Credentials
+db.user=root
+db.password=your_mysql_password_here
+
+# Connection Timeout (in seconds)
+db.timeout=5
