@@ -137,6 +137,19 @@ public final class Network {
         return links.size();
     }
 
+    /**
+     * Returns the number of links currently in the inactive/failed state.
+     */
+    public int countInactiveLinks() {
+        int count = 0;
+        for (NetworkLink link : links.values()) {
+            if (!link.isActive()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public boolean containsNode(String nodeId) {
         return nodes.containsKey(nodeId);
     }

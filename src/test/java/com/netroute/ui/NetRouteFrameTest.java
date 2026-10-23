@@ -400,6 +400,38 @@ class NetRouteFrameTest {
     }
 
     @Test
+    void simulationHistoryPageNavigationAndNavBarVerification() {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        assertNotNull(frame.getSimulationHistoryPage(), "Frame must initialize SimulationHistoryPage");
+        frame.showSimulationHistoryPage();
+        assertEquals(NetRouteFrame.CARD_SIMULATION_HISTORY, frame.getCurrentCard());
+
+        frame.onShowSimulationHistory();
+        assertEquals(NetRouteFrame.CARD_SIMULATION_HISTORY, frame.getCurrentCard());
+
+        // Verify simulator navbar has Run History button
+        frame.showSimulatorPage();
+        assertEquals(NetRouteFrame.CARD_SIMULATOR, frame.getCurrentCard());
+
+        javax.swing.JButton btnRunHistory = findButtonWithText(frame, "Run History");
+        assertNotNull(btnRunHistory, "Simulator navbar must have 'Run History' button");
+        btnRunHistory.doClick();
+        assertEquals(NetRouteFrame.CARD_SIMULATION_HISTORY, frame.getCurrentCard());
+
+        frame.showLandingPage();
+        assertEquals(NetRouteFrame.CARD_LANDING, frame.getCurrentCard());
+
+        frame.dispose();
+    }
+
+    @Test
     void netRouteFrameLoadsTopologyAndResetsSimulation() throws Exception {
         if (GraphicsEnvironment.isHeadless()) {
             return;
@@ -811,4 +843,72 @@ class NetRouteFrameTest {
 
         frame.dispose();
     }
+
+    @Test
+    void netRouteFrameSavesCurrentlyFailedLinksNotCumulativeFailures() throws Exception {
+        if (GraphicsEnvironment.isHeadless()) {
+            return;
+        }
+
+        NetRouteFrame frame = new NetRouteFrame();
+        assertNotNull(frame);
+        frame.setSkipConfirmationForTesting(true);
+
+        if (frame.getStorageService().isDatabaseAvailable()) {
+            Network net = new Network();
+            net.addNode(new com.netroute.model.Computer("FS_PC1", "PC 1", 100, 100));
+            net.addNode(new com.netroute.model.Router("FS_R1", "Router 1", 200, 100));
+            net.addNode(new com.netroute.model.Server("FS_S1", "Server 1", 300, 100));
+            net.addLink(new com.netroute.model.NetworkLink("FS_L1", "FS_PC1", "FS_R1", 1.0, 1.0, 10, false));
+            net.addLink(new com.netroute.model.NetworkLink("FS_L2", "FS_R1", "FS_S1", 1.0, 1.0, 10, false));
+
+            String topName = "FailSemantics_UI_" + System.currentTimeMillis();
+            int topId = frame.getStorageService().saveTopology(topName, "Fail semantics UI test", net, false);
+
+            frame.handleLoadTopology(topId, topName);
+
+            // Transmit packet
+            frame.onSendPacket("FS_PC1", "FS_S1");
+            frame.onStepSimulation();
+
+            // Fail 2 links, then restore 1 link
+            frame.onFailLink("FS_L1");
+            frame.onFailLink("FS_L2");
+            frame.onRestoreLink("FS_L1");
+
+            // At this point: cumulative fail events = 2, but currently failed links = 1 (FS_L2)
+            boolean saved = frame.executeFinishAndSaveRun("Testing failure semantics in frame");
+            assertTrue(saved);
+
+            int runId = frame.getLastSavedRunId();
+            Optional<SimulationRunRecord> runOpt = frame.getStorageService().getRunById(runId);
+            assertTrue(runOpt.isPresent());
+            assertEquals(1, runOpt.get().getLinkFailures(), "Persisted Failures must be 1 (currently failed), NOT 2 (cumulative)");
+
+            // Cleanup
+            frame.getStorageService().deleteRun(runId);
+            frame.getStorageService().deleteTopologyPermanently(topId);
+        }
+
+        frame.dispose();
+    }
+
+    private static javax.swing.JButton findButtonWithText(java.awt.Component root, String text) {
+        if (root instanceof javax.swing.JButton btn) {
+            if (btn.getText() != null && btn.getText().contains(text)) {
+                return btn;
+            }
+        }
+        if (root instanceof java.awt.Container container) {
+            for (java.awt.Component child : container.getComponents()) {
+                javax.swing.JButton found = findButtonWithText(child, text);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+
 }

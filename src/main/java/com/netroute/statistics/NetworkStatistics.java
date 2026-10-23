@@ -136,7 +136,16 @@ public final class NetworkStatistics {
 
     /** Number of links currently inactive (ignored by routing). */
     public int getInactiveLinks() {
-        return getTotalLinks() - getActiveLinks();
+        return network.countInactiveLinks();
+    }
+
+    /** Number of links currently in the failed/inactive state in the network graph. */
+    public int getCurrentlyFailedLinks() {
+        return network.countInactiveLinks();
+    }
+
+    public Network getNetwork() {
+        return network;
     }
 
     // ---- Failure and reroute metrics ----

@@ -188,6 +188,26 @@ public class TopologyStorageService {
     }
 
     /**
+     * Records a simulation run snapshot with explicit failed link count for future analytics.
+     */
+    public int recordSimulationRun(
+            Integer topologyId,
+            String topologyName,
+            NetworkStatistics stats,
+            int currentlyFailedLinks,
+            long simulationTicks,
+            String notes) throws SQLException {
+        return historyRepository.recordSimulationRun(topologyId, topologyName, stats, currentlyFailedLinks, simulationTicks, notes);
+    }
+
+    /**
+     * Lists all simulation runs across all topologies, newest first.
+     */
+    public List<SimulationRunRecord> listAllSimulationRuns() throws SQLException {
+        return historyRepository.listAllRuns();
+    }
+
+    /**
      * Lists simulation history for a specific topology.
      */
     public List<SimulationRunRecord> listRunsForTopology(int topologyId) throws SQLException {
@@ -213,5 +233,12 @@ public class TopologyStorageService {
      */
     public boolean deleteRun(int runId) throws SQLException {
         return historyRepository.deleteRun(runId);
+    }
+
+    /**
+     * Returns the underlying simulation history repository.
+     */
+    public SimulationHistoryRepository getHistoryRepository() {
+        return historyRepository;
     }
 }

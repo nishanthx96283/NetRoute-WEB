@@ -32,6 +32,7 @@ public class LandingPage extends JPanel {
         void onShowTechStack();
         void onShowAbout();
         void onShowHistory();
+        default void onShowSimulationHistory() {}
     }
 
     private final Listener listener;
@@ -146,10 +147,17 @@ public class LandingPage extends JPanel {
             }
         });
 
-        JButton btnHistoryNav = createNavButton("History");
+        JButton btnHistoryNav = createNavButton("Topologies");
         btnHistoryNav.addActionListener(e -> {
             if (listener != null) {
                 listener.onShowHistory();
+            }
+        });
+
+        JButton btnSimHistoryNav = createNavButton("Run History");
+        btnSimHistoryNav.addActionListener(e -> {
+            if (listener != null) {
+                listener.onShowSimulationHistory();
             }
         });
 
@@ -163,6 +171,7 @@ public class LandingPage extends JPanel {
 
         navPanel.add(btnAboutNav);
         navPanel.add(btnHistoryNav);
+        navPanel.add(btnSimHistoryNav);
         navPanel.add(Box.createRigidArea(new Dimension(8, 0)));
         navPanel.add(btnSimHeader);
 

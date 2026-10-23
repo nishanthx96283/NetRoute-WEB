@@ -249,11 +249,15 @@ public class TopologyRepository {
                 // Simulation run persistence within the SAME transaction
                 Integer simulationRunId = null;
                 if (statsToRecord != null) {
+                    int currentlyFailedLinks = (network != null)
+                            ? network.countInactiveLinks()
+                            : statsToRecord.getCurrentlyFailedLinks();
                     simulationRunId = historyRepository.recordSimulationRunInternal(
                             conn,
                             targetTopologyId,
                             targetTopologyName,
                             statsToRecord,
+                            currentlyFailedLinks,
                             simulationTicks,
                             runNotes
                     );

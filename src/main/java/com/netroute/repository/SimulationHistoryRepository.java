@@ -46,8 +46,22 @@ public class SimulationHistoryRepository {
             NetworkStatistics stats,
             long simulationTicks,
             String notes) throws SQLException {
+        int failedLinks = (stats != null) ? stats.getCurrentlyFailedLinks() : 0;
+        return recordSimulationRun(topologyId, topologyName, stats, failedLinks, simulationTicks, notes);
+    }
+
+    /**
+     * Records a historical snapshot of simulation performance with explicit failed link count.
+     */
+    public int recordSimulationRun(
+            Integer topologyId,
+            String topologyName,
+            NetworkStatistics stats,
+            int currentlyFailedLinks,
+            long simulationTicks,
+            String notes) throws SQLException {
         try (Connection conn = databaseConnection.getConnection()) {
-            return recordSimulationRunInternal(conn, topologyId, topologyName, stats, simulationTicks, notes);
+            return recordSimulationRunInternal(conn, topologyId, topologyName, stats, currentlyFailedLinks, simulationTicks, notes);
         }
     }
 
@@ -68,6 +82,22 @@ public class SimulationHistoryRepository {
             Integer topologyId,
             String topologyName,
             NetworkStatistics stats,
+            long simulationTicks,
+            String notes) throws SQLException {
+        int failedLinks = (stats != null) ? stats.getCurrentlyFailedLinks() : 0;
+        return recordSimulationRunInternal(conn, topologyId, topologyName, stats, failedLinks, simulationTicks, notes);
+    }
+
+    /**
+     * Records a historical snapshot of simulation performance using an existing JDBC connection
+     * with an explicit count of links currently in the failed/inactive state.
+     */
+    public int recordSimulationRunInternal(
+            Connection conn,
+            Integer topologyId,
+            String topologyName,
+            NetworkStatistics stats,
+            int currentlyFailedLinks,
             long simulationTicks,
             String notes) throws SQLException {
         Objects.requireNonNull(conn, "conn is required");
@@ -93,7 +123,7 @@ public class SimulationHistoryRepository {
             ps.setInt(7, stats.getDroppedCount());
             ps.setDouble(8, stats.getDeliveryRatio());
             ps.setDouble(9, stats.getAverageDeliveryDelay());
-            ps.setInt(10, stats.getLinkFailureCount());
+            ps.setInt(10, currentlyFailedLinks);
             ps.setInt(11, stats.getTotalReroutes());
             ps.setString(12, notes == null ? "" : notes.trim());
 
@@ -131,6 +161,27 @@ public class SimulationHistoryRepository {
     }
 
     /**
+     * Retrieves all recorded simulation runs across all topologies, ordered newest first
+     * with stable secondary ordering by id descending.
+     */
+    public List<SimulationRunRecord> listAllRuns() throws SQLException {
+        String sql = "SELECT id, topology_id, topology_name, run_timestamp, simulation_ticks, "
+                + "total_packets, delivered_packets, failed_packets, dropped_packets, "
+                + "delivery_ratio, avg_delivery_delay, link_failures, reroutes, notes "
+                + "FROM simulation_runs ORDER BY run_timestamp DESC, id DESC";
+
+        List<SimulationRunRecord> list = new ArrayList<>();
+        try (Connection conn = databaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                list.add(mapRun(rs));
+            }
+        }
+        return list;
+    }
+
+    /**
      * Retrieves the most recent simulation runs across all topologies.
      */
     public List<SimulationRunRecord> listRecentRuns(int limit) throws SQLException {
@@ -138,7 +189,7 @@ public class SimulationHistoryRepository {
         String sql = "SELECT id, topology_id, topology_name, run_timestamp, simulation_ticks, "
                 + "total_packets, delivered_packets, failed_packets, dropped_packets, "
                 + "delivery_ratio, avg_delivery_delay, link_failures, reroutes, notes "
-                + "FROM simulation_runs ORDER BY run_timestamp DESC LIMIT ?";
+                + "FROM simulation_runs ORDER BY run_timestamp DESC, id DESC LIMIT ?";
 
         List<SimulationRunRecord> list = new ArrayList<>();
         try (Connection conn = databaseConnection.getConnection();

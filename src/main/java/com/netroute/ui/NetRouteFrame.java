@@ -63,6 +63,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     public static final String CARD_TECH_STACK = "TECH_STACK";
     public static final String CARD_ABOUT = "ABOUT";
     public static final String CARD_HISTORY = "HISTORY";
+    public static final String CARD_SIMULATION_HISTORY = "SIMULATION_HISTORY";
 
     private final CardLayout cardLayout = new CardLayout();
     private final JPanel rootPanel = new JPanel(cardLayout);
@@ -80,6 +81,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     private TechStackPage techStackPage;
     private AboutPage aboutPage;
     private HistoryPage historyPage;
+    private SimulationHistoryPage simulationHistoryPage;
     private JPanel simulatorView;
     private TopologyPanel topologyPanel;
     private ControlPanel controlPanel;
@@ -204,7 +206,22 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         historyPage = new HistoryPage(storageService, historyNav);
         rootPanel.add(historyPage, CARD_HISTORY);
 
-        // 5. Simulator Page Card
+        // 5. Simulation History Page Card
+        SimulationHistoryPage.Listener simHistoryNav = new SimulationHistoryPage.Listener() {
+            @Override
+            public void onBackToHome() {
+                showLandingPage();
+            }
+
+            @Override
+            public void onLaunchSimulator() {
+                showSimulatorPage();
+            }
+        };
+        simulationHistoryPage = new SimulationHistoryPage(storageService, simHistoryNav);
+        rootPanel.add(simulationHistoryPage, CARD_SIMULATION_HISTORY);
+
+        // 6. Simulator Page Card
         simulatorView = createSimulatorView();
         rootPanel.add(simulatorView, CARD_SIMULATOR);
 
@@ -359,6 +376,12 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         btnHistory.setFont(Theme.FONT_SMALL);
         btnHistory.addActionListener(e -> showHistoryPage());
 
+        JButton btnSimHistory = Theme.createButton("📊 Run History", Theme.ButtonStyle.SECONDARY);
+        btnSimHistory.setPreferredSize(new Dimension(115, 30));
+        btnSimHistory.setFont(Theme.FONT_SMALL);
+        btnSimHistory.setToolTipText("View recorded simulation runs and metrics");
+        btnSimHistory.addActionListener(e -> showSimulationHistoryPage());
+
         JButton btnReset = Theme.createButton("Reset Network", Theme.ButtonStyle.OUTLINE);
         btnReset.setPreferredSize(new Dimension(115, 30));
         btnReset.setFont(Theme.FONT_SMALL);
@@ -367,6 +390,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         right.add(lblStatusBadge);
         right.add(btnSave);
         right.add(btnHistory);
+        right.add(btnSimHistory);
         right.add(btnReset);
         right.add(btnHome);
 
@@ -436,6 +460,8 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         itemSimulator.addActionListener(e -> showSimulatorPage());
         JMenuItem itemHistory = createStyledMenuItem("📂 Saved Topologies & History");
         itemHistory.addActionListener(e -> showHistoryPage());
+        JMenuItem itemSimHistory = createStyledMenuItem("📊 Simulation Run History");
+        itemSimHistory.addActionListener(e -> showSimulationHistoryPage());
         JMenuItem itemTechStack = createStyledMenuItem("Tech Stack & Architecture");
         itemTechStack.addActionListener(e -> showTechStackPage());
         JMenuItem itemAboutFile = createStyledMenuItem("About NetRoute");
@@ -454,6 +480,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         menuFile.add(itemHome);
         menuFile.add(itemSimulator);
         menuFile.add(itemHistory);
+        menuFile.add(itemSimHistory);
         menuFile.add(itemSave);
         menuFile.add(itemTechStack);
         menuFile.add(itemAboutFile);
@@ -467,6 +494,8 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         itemRandomize.addActionListener(e -> onRandomizeLinkCosts());
         JMenuItem itemStep = createStyledMenuItem("Step Simulation (1 Tick)");
         itemStep.addActionListener(e -> onStepSimulation());
+        JMenuItem itemSimHistory2 = createStyledMenuItem("📊 View Simulation History...");
+        itemSimHistory2.addActionListener(e -> showSimulationHistoryPage());
         JMenuItem itemClearLog = createStyledMenuItem("Clear Log");
         itemClearLog.addActionListener(e -> {
             if (logArea != null) {
@@ -475,6 +504,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         });
         menuSim.add(itemRandomize);
         menuSim.add(itemStep);
+        menuSim.add(itemSimHistory2);
         menuSim.add(itemClearLog);
 
         JMenu menuHelp = createStyledMenu("Help");
@@ -536,8 +566,20 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         }
     }
 
+    public void showSimulationHistoryPage() {
+        cardLayout.show(rootPanel, CARD_SIMULATION_HISTORY);
+        this.currentCard = CARD_SIMULATION_HISTORY;
+        if (simulationHistoryPage != null) {
+            simulationHistoryPage.refresh();
+        }
+    }
+
     public String getCurrentCard() {
         return currentCard;
+    }
+
+    public SimulationHistoryPage getSimulationHistoryPage() {
+        return simulationHistoryPage;
     }
 
     @Override
@@ -558,6 +600,11 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     @Override
     public void onShowHistory() {
         showHistoryPage();
+    }
+
+    @Override
+    public void onShowSimulationHistory() {
+        showSimulationHistoryPage();
     }
 
     private void setStatusBadge(String text, Color color) {
@@ -1540,7 +1587,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
                             + "<b>Simulation Ticks:</b> %d<br/>"
                             + "<b>Packets:</b> %d (Delivered: %d, Failed: %d, Dropped: %d)<br/>"
                             + "<b>Delivery Ratio:</b> %.1f%% &nbsp;|&nbsp; <b>Avg Delay:</b> %.2f ticks<br/>"
-                            + "<b>Link Failures:</b> %d &nbsp;|&nbsp; <b>Reroutes:</b> %d</html>",
+                            + "<b>Failed Links:</b> %d &nbsp;|&nbsp; <b>Reroutes:</b> %d</html>",
                     activeTopologyName != null ? activeTopologyName : "Unsaved Network",
                     activeTopologyId != null ? "(ID #" + activeTopologyId + ")" : "(Unsaved)",
                     engine.getCurrentTime(),
@@ -1550,7 +1597,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
                     currentStats.getDroppedCount(),
                     currentStats.getDeliveryRatio(),
                     currentStats.getAverageDeliveryDelay(),
-                    currentStats.getLinkFailureCount(),
+                    network.countInactiveLinks(),
                     currentStats.getTotalReroutes()
             ));
             lblInfo.setFont(Theme.FONT_BODY);
@@ -1775,6 +1822,9 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         this.storageService = storageService;
         if (this.historyPage != null) {
             this.historyPage.setStorageService(storageService);
+        }
+        if (this.simulationHistoryPage != null) {
+            this.simulationHistoryPage.setStorageService(storageService);
         }
     }
 
