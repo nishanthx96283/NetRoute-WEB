@@ -9,6 +9,7 @@ import com.netroute.model.Packet;
 import com.netroute.model.PacketStatus;
 import com.netroute.model.Route;
 import com.netroute.repository.DuplicateTopologyNameException;
+import com.netroute.repository.UnifiedSaveResult;
 import com.netroute.routing.DijkstraRouter;
 import com.netroute.service.TopologyStorageService;
 import com.netroute.simulation.SimulationEngine;
@@ -85,12 +86,23 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     private StatisticsPanel statisticsPanel;
     private JTextArea logArea;
     private JLabel lblStatusBadge;
+    private JButton btnNewProject;
+
+    public enum UnsavedChangesAction {
+        PROMPT,
+        SAVE,
+        DISCARD,
+        CANCEL
+    }
 
     private boolean skipConfirmationForTesting = false;
+    private UnsavedChangesAction testUnsavedChangesAction = UnsavedChangesAction.DISCARD;
 
-    // Simulation run persistence tracking
+    // State and persistence tracking
     private Integer activeTopologyId = null;
     private String activeTopologyName = "Sample Campus Network";
+    private String activeTopologyDescription = "";
+    private boolean topologyModified = false;
     private boolean currentRunSaved = false;
     private Integer lastSavedRunId = null;
 
@@ -123,6 +135,8 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         this.storageService = new TopologyStorageService();
         this.activeTopologyId = null;
         this.activeTopologyName = "Sample Campus Network";
+        this.activeTopologyDescription = "";
+        this.topologyModified = false;
         this.currentRunSaved = false;
         this.lastSavedRunId = null;
     }
@@ -296,10 +310,18 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         lblTitle.setFont(Theme.FONT_BODY_BOLD);
         lblTitle.setForeground(Theme.ACCENT_CYAN);
 
+        btnNewProject = Theme.createButton("＋ New", Theme.ButtonStyle.SECONDARY);
+        btnNewProject.setPreferredSize(new Dimension(80, 28));
+        btnNewProject.setFont(Theme.FONT_SMALL);
+        btnNewProject.setToolTipText("Start a fresh network project (Ctrl+N)");
+        btnNewProject.addActionListener(e -> onNewProject());
+
         left.add(logoIcon);
         left.add(lblBrand);
         left.add(lblSep);
         left.add(lblTitle);
+        left.add(Box.createRigidArea(new Dimension(10, 0)));
+        left.add(btnNewProject);
 
         // Right Actions & Status Badge
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
@@ -327,10 +349,10 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         btnHome.setFont(Theme.FONT_SMALL);
         btnHome.addActionListener(e -> showLandingPage());
 
-        JButton btnSaveTop = Theme.createButton("💾 Save Topology", Theme.ButtonStyle.PRIMARY);
-        btnSaveTop.setPreferredSize(new Dimension(135, 30));
-        btnSaveTop.setFont(Theme.FONT_SMALL);
-        btnSaveTop.addActionListener(e -> onSaveTopology());
+        JButton btnSave = Theme.createButton("💾 Save", Theme.ButtonStyle.PRIMARY);
+        btnSave.setPreferredSize(new Dimension(100, 30));
+        btnSave.setFont(Theme.FONT_SMALL);
+        btnSave.addActionListener(e -> onSave());
 
         JButton btnHistory = Theme.createButton("📂 History", Theme.ButtonStyle.SECONDARY);
         btnHistory.setPreferredSize(new Dimension(100, 30));
@@ -343,7 +365,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         btnReset.addActionListener(e -> onResetNetwork());
 
         right.add(lblStatusBadge);
-        right.add(btnSaveTop);
+        right.add(btnSave);
         right.add(btnHistory);
         right.add(btnReset);
         right.add(btnHome);
@@ -404,6 +426,10 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         menuBar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_SUBTLE));
 
         JMenu menuFile = createStyledMenu("File");
+        JMenuItem itemNew = createStyledMenuItem("＋ New Project");
+        itemNew.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_N,
+                java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+        itemNew.addActionListener(e -> onNewProject());
         JMenuItem itemHome = createStyledMenuItem("Home");
         itemHome.addActionListener(e -> showLandingPage());
         JMenuItem itemSimulator = createStyledMenuItem("Network Simulator");
@@ -414,13 +440,17 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         itemTechStack.addActionListener(e -> showTechStackPage());
         JMenuItem itemAboutFile = createStyledMenuItem("About NetRoute");
         itemAboutFile.addActionListener(e -> showAboutPage());
-        JMenuItem itemSave = createStyledMenuItem("💾 Save Topology to Database...");
-        itemSave.addActionListener(e -> onSaveTopology());
+        JMenuItem itemSave = createStyledMenuItem("💾 Save to Database...");
+        itemSave.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_S,
+                java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
+        itemSave.addActionListener(e -> onSave());
         JMenuItem itemReset = createStyledMenuItem("Reset Sample Network");
         itemReset.addActionListener(e -> onResetNetwork());
         JMenuItem itemExit = createStyledMenuItem("Exit");
         itemExit.addActionListener(e -> System.exit(0));
 
+        menuFile.add(itemNew);
+        menuFile.addSeparator();
         menuFile.add(itemHome);
         menuFile.add(itemSimulator);
         menuFile.add(itemHistory);
@@ -437,8 +467,6 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         itemRandomize.addActionListener(e -> onRandomizeLinkCosts());
         JMenuItem itemStep = createStyledMenuItem("Step Simulation (1 Tick)");
         itemStep.addActionListener(e -> onStepSimulation());
-        JMenuItem itemFinishRun = createStyledMenuItem("📊 Finish & Save Simulation Run...");
-        itemFinishRun.addActionListener(e -> onFinishAndSaveRun());
         JMenuItem itemClearLog = createStyledMenuItem("Clear Log");
         itemClearLog.addActionListener(e -> {
             if (logArea != null) {
@@ -447,7 +475,6 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         });
         menuSim.add(itemRandomize);
         menuSim.add(itemStep);
-        menuSim.add(itemFinishRun);
         menuSim.add(itemClearLog);
 
         JMenu menuHelp = createStyledMenu("Help");
@@ -577,6 +604,14 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
     @Override
     public void onSendPacket(String sourceId, String destinationId) {
+        if (sourceId == null || destinationId == null || !network.containsNode(sourceId) || !network.containsNode(destinationId)) {
+            topologyPanel.clearHighlightedRoute();
+            controlPanel.setRouteResult("Select valid source and destination nodes.", false);
+            log(String.format("[Packet Error] Unknown or missing endpoints (%s -> %s).", sourceId, destinationId));
+            setStatusBadge("Invalid Endpoints", Theme.STATUS_ERROR);
+            return;
+        }
+
         this.currentRunSaved = false;
         topologyPanel.setSelectedEndpoints(sourceId, destinationId);
         setStatusBadge("Transmitting", Theme.STATUS_WARNING);
@@ -681,12 +716,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
 
     @Override
     public void onRandomizeLinkCosts() {
-        if (this.activeTopologyId != null) {
-            this.activeTopologyId = null;
-            if (this.activeTopologyName != null && !this.activeTopologyName.endsWith("(Randomized Costs)")) {
-                this.activeTopologyName = this.activeTopologyName + " (Randomized Costs)";
-            }
-        }
+        markTopologyModified();
         graphManager.randomizeLinkCosts();
         controlPanel.populateLinks(network);
         topologyPanel.repaint();
@@ -864,12 +894,157 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         setStatusBadge("Simulation Ready", Theme.STATUS_SUCCESS);
     }
 
-    @Override
-    public void onSaveTopology() {
-        promptAndSaveTopology(null, null);
+    // ==========================================
+    // New Project Implementation
+    // ==========================================
+
+    public boolean onNewProject() {
+        return onNewProject(skipConfirmationForTesting ? testUnsavedChangesAction : UnsavedChangesAction.PROMPT);
     }
 
-    public boolean promptAndSaveTopology(String initialName, String initialDescription) {
+    public boolean onNewProject(UnsavedChangesAction requestedAction) {
+        UnsavedChangesAction action = requestedAction != null ? requestedAction : UnsavedChangesAction.PROMPT;
+
+        if (hasUnsavedChanges()) {
+            if (action == UnsavedChangesAction.PROMPT && !GraphicsEnvironment.isHeadless() && isVisible()) {
+                Object[] options = {"Save", "Discard", "Cancel"};
+                int choice = JOptionPane.showOptionDialog(
+                        this,
+                        "You have unsaved changes in the current project.\n\n"
+                                + "• Save — save current topology and simulation metrics before starting a new project.\n"
+                                + "• Discard — discard all unsaved changes and open a blank project.\n"
+                                + "• Cancel — return to the current project without changes.",
+                        "Unsaved Changes",
+                        JOptionPane.DEFAULT_OPTION,
+                        JOptionPane.WARNING_MESSAGE,
+                        null,
+                        options,
+                        options[0]
+                );
+                if (choice == 0) { // Save
+                    action = UnsavedChangesAction.SAVE;
+                } else if (choice == 1) { // Discard
+                    action = UnsavedChangesAction.DISCARD;
+                } else { // Cancel or closed
+                    action = UnsavedChangesAction.CANCEL;
+                }
+            }
+
+            if (action == UnsavedChangesAction.SAVE) {
+                boolean saved = promptAndSave();
+                if (!saved) {
+                    log("[New Project Cancelled] Save was not completed; staying in current project.");
+                    return false;
+                }
+                createFreshProject();
+                return true;
+            } else if (action == UnsavedChangesAction.DISCARD) {
+                log("[New Project] Discarding unsaved changes.");
+                createFreshProject();
+                return true;
+            } else {
+                log("[New Project Cancelled] Operation cancelled by user.");
+                return false;
+            }
+        }
+
+        // No unsaved changes
+        if (!skipConfirmationForTesting && !GraphicsEnvironment.isHeadless() && isVisible() && network != null && network.nodeCount() > 0) {
+            int confirm = JOptionPane.showConfirmDialog(
+                    this,
+                    "Start a fresh network project?\nThe current canvas will be cleared.",
+                    "New Project",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE
+            );
+            if (confirm != JOptionPane.YES_OPTION) {
+                log("[New Project Cancelled] New project cancelled by user.");
+                return false;
+            }
+        }
+
+        createFreshProject();
+        return true;
+    }
+
+    public void createFreshProject() {
+        Network emptyNetwork = new Network();
+        setNetwork(emptyNetwork);
+
+        this.activeTopologyId = null;
+        this.activeTopologyName = "Untitled Network";
+        this.activeTopologyDescription = "";
+        this.topologyModified = false;
+        this.currentRunSaved = false;
+        this.lastSavedRunId = null;
+
+        if (this.topologyPanel != null) {
+            this.topologyPanel.clearHighlightedRoute();
+            this.topologyPanel.setSelectedEndpoints(null, null);
+            this.topologyPanel.repaint();
+        }
+
+        if (this.controlPanel != null) {
+            this.controlPanel.populate(this.network);
+            this.controlPanel.setRouteResult("New project ready. Add nodes to begin.", true);
+        }
+
+        if (this.statisticsPanel != null) {
+            this.statisticsPanel.updateStatistics(new NetworkStatistics(this.engine));
+        }
+
+        showSimulatorPage();
+        setStatusBadge("New Project Ready", Theme.STATUS_SUCCESS);
+        log("--------------------------------------------------");
+        log("[New Project] Created fresh blank network project. Canvas is empty.");
+        log("Ready. Use 'Add Node' in the control panel to add computers, routers, or servers.");
+    }
+
+    public boolean hasUnsavedChanges() {
+        if (isSimulationActivityUnsaved()) {
+            return true;
+        }
+        if (topologyModified) {
+            return true;
+        }
+        if (activeTopologyId == null && network != null && network.nodeCount() > 0
+                && !"Sample Campus Network".equals(activeTopologyName)) {
+            return true;
+        }
+        return false;
+    }
+
+    public JButton getBtnNewProject() {
+        return btnNewProject;
+    }
+
+    public boolean triggerNewProject() {
+        return onNewProject();
+    }
+
+    public UnsavedChangesAction getTestUnsavedChangesAction() {
+        return testUnsavedChangesAction;
+    }
+
+    public void setTestUnsavedChangesAction(UnsavedChangesAction testUnsavedChangesAction) {
+        this.testUnsavedChangesAction = testUnsavedChangesAction;
+    }
+
+    // ==========================================
+    // Unified Save Implementation
+    // ==========================================
+
+    @Override
+    public void onSave() {
+        promptAndSave();
+    }
+
+    @Override
+    public void onSaveTopology() {
+        onSave();
+    }
+
+    public boolean promptAndSave() {
         if (storageService == null || !storageService.isDatabaseAvailable()) {
             if (!skipConfirmationForTesting) {
                 JOptionPane.showMessageDialog(
@@ -886,17 +1061,89 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
             return false;
         }
 
+        if (network == null || network.nodeCount() == 0) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Cannot save an empty network.\nPlease add at least one node before saving.",
+                        "Validation Error",
+                        JOptionPane.WARNING_MESSAGE
+                );
+            }
+            log("[Save Aborted] Cannot save an empty network topology.");
+            return false;
+        }
+
+        if (activeTopologyId != null && activeTopologyId > 0) {
+            // Case A: Existing topology loaded from History or previously saved
+            if (!skipConfirmationForTesting && !GraphicsEnvironment.isHeadless() && isVisible()) {
+                String confirmMsg = "Topology '" + activeTopologyName + "' (ID: #" + activeTopologyId + ") is already saved in the database.\n\n"
+                        + "Do you want to overwrite it with the current network configuration in MySQL?";
+                int confirm = JOptionPane.showConfirmDialog(
+                        this,
+                        confirmMsg,
+                        "Confirm Overwrite Topology",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.QUESTION_MESSAGE
+                );
+                if (confirm != JOptionPane.YES_OPTION) {
+                    log("[Save Cancelled] Overwrite of topology '" + activeTopologyName + "' cancelled by user.");
+                    return false;
+                }
+            }
+            return executeUnifiedSave(activeTopologyId, activeTopologyName, activeTopologyDescription, true, null);
+        } else {
+            // Case B: New unsaved topology
+            return promptAndSaveNewTopology(null, null);
+        }
+    }
+
+    public boolean promptAndSaveNewTopology(String initialName, String initialDescription) {
+        if (storageService == null || !storageService.isDatabaseAvailable()) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Cannot connect to MySQL database.\n\n"
+                                + "Please verify that MySQL server is running on localhost:3306\n"
+                                + "and credentials in 'db.properties' are correct.",
+                        "Database Connection Error",
+                        JOptionPane.ERROR_MESSAGE
+                );
+            }
+            log("[Database Error] Save aborted: MySQL database is unreachable.");
+            return false;
+        }
+
+        if (network == null || network.nodeCount() == 0) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Cannot save an empty network.\nPlease add at least one node before saving.",
+                        "Validation Error",
+                        JOptionPane.WARNING_MESSAGE
+                );
+            }
+            log("[Save Aborted] Cannot save an empty network topology.");
+            return false;
+        }
+
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
         JLabel lblName = new JLabel("Topology Name (required):");
         lblName.setFont(Theme.FONT_BODY_BOLD);
-        javax.swing.JTextField txtName = new javax.swing.JTextField(initialName != null ? initialName : "", 22);
+        String defaultName = (initialName != null && !initialName.isBlank())
+                ? initialName
+                : ((activeTopologyName != null && !activeTopologyName.isBlank()
+                    && !activeTopologyName.contains("(Deleted")
+                    && !activeTopologyName.equals("Untitled Network"))
+                ? activeTopologyName : "My Network");
+        JTextField txtName = new JTextField(defaultName, 22);
         Theme.styleTextField(txtName);
 
         JLabel lblDesc = new JLabel("Description (optional):");
         lblDesc.setFont(Theme.FONT_BODY_BOLD);
-        javax.swing.JTextField txtDesc = new javax.swing.JTextField(initialDescription != null ? initialDescription : "", 22);
+        JTextField txtDesc = new JTextField(initialDescription != null ? initialDescription : activeTopologyDescription, 22);
         Theme.styleTextField(txtDesc);
 
         panel.add(lblName);
@@ -907,17 +1154,19 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         panel.add(Box.createRigidArea(new Dimension(0, 4)));
         panel.add(txtDesc);
 
-        int result = JOptionPane.showConfirmDialog(
-                this,
-                panel,
-                "Save Network Topology to Database",
-                JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE
-        );
+        if (!skipConfirmationForTesting && !GraphicsEnvironment.isHeadless() && isVisible()) {
+            int result = JOptionPane.showConfirmDialog(
+                    this,
+                    panel,
+                    "Save Network Topology to Database",
+                    JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.PLAIN_MESSAGE
+            );
 
-        if (result != JOptionPane.OK_OPTION) {
-            log("[Save Cancelled] Save topology operation cancelled by user.");
-            return false;
+            if (result != JOptionPane.OK_OPTION) {
+                log("[Save Cancelled] Save topology operation cancelled by user.");
+                return false;
+            }
         }
 
         String name = txtName.getText().trim();
@@ -930,40 +1179,113 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
                     "Validation Error",
                     JOptionPane.WARNING_MESSAGE
             );
-            return promptAndSaveTopology(null, desc);
+            return promptAndSaveNewTopology(null, desc);
         }
 
-        return executeSaveTopology(name, desc, false);
+        return executeUnifiedSave(null, name, desc, false, null);
     }
 
-    public boolean executeSaveTopology(String name, String description, boolean overwrite) {
-        if (storageService == null) {
-            log("[Database Error] Storage service not initialized.");
-            return false;
-        }
-        try {
-            int topologyId = storageService.saveTopology(name, description, network, overwrite);
-            this.activeTopologyId = topologyId;
-            this.activeTopologyName = name;
-            String action = overwrite ? "overwritten" : "saved";
-            String successMsg = "Topology '" + name + "' successfully " + action + " to database!\n"
-                    + "Database ID: " + topologyId + "\n"
-                    + "Nodes: " + network.nodeCount() + " | Links: " + network.linkCount();
+    public boolean executeUnifiedSave(
+            Integer targetTopologyId,
+            String name,
+            String description,
+            boolean overwriteIfExists,
+            String runNotes) {
+        if (storageService == null || !storageService.isDatabaseAvailable()) {
             if (!skipConfirmationForTesting) {
                 JOptionPane.showMessageDialog(
                         this,
-                        successMsg,
-                        "Topology Saved",
-                        JOptionPane.INFORMATION_MESSAGE
+                        "Cannot connect to MySQL database.\n\nPlease verify MySQL is running and db.properties is valid.",
+                        "Database Connection Error",
+                        JOptionPane.ERROR_MESSAGE
                 );
             }
-            log(String.format("[Database Save] Topology '%s' successfully %s (ID: %d, %d nodes, %d links).",
-                    name, action, topologyId, network.nodeCount(), network.linkCount()));
-            setStatusBadge("Topology Saved", Theme.STATUS_SUCCESS);
+            log("[Database Error] Save aborted: MySQL database is unreachable.");
+            return false;
+        }
+
+        if (network == null || network.nodeCount() == 0) {
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(
+                        this,
+                        "Cannot save an empty network.\nPlease add at least one node to the canvas before saving.",
+                        "Validation Error",
+                        JOptionPane.WARNING_MESSAGE
+                );
+            }
+            log("[Database Error] Save aborted: Cannot save an empty network.");
+            return false;
+        }
+
+        boolean hasUnsavedRun = isSimulationActivityUnsaved();
+        NetworkStatistics statsToRecord = hasUnsavedRun ? new NetworkStatistics(engine) : null;
+        long ticks = hasUnsavedRun ? engine.getCurrentTime() : 0L;
+        String safeNotes = (runNotes != null) ? runNotes.trim() : "";
+        if (safeNotes.length() > 255) {
+            safeNotes = safeNotes.substring(0, 255);
+        }
+
+        try {
+            UnifiedSaveResult result = storageService.saveUnified(
+                    targetTopologyId,
+                    name,
+                    description,
+                    network,
+                    overwriteIfExists,
+                    statsToRecord,
+                    ticks,
+                    safeNotes
+            );
+
+            // Update state ONLY after successful commit
+            this.activeTopologyId = result.getTopologyId();
+            this.activeTopologyName = result.getTopologyName();
+            this.activeTopologyDescription = (description != null) ? description.trim() : "";
+            this.topologyModified = false;
+
+            if (result.hasSimulationRun()) {
+                this.currentRunSaved = true;
+                this.lastSavedRunId = result.getSimulationRunId();
+            }
+
+            String actionStr = result.isCreated() ? "created as new record" : "updated existing record";
+            StringBuilder sb = new StringBuilder();
+            sb.append("Save Successful!\n\n");
+            sb.append("• Topology: '").append(result.getTopologyName()).append("' (ID: #").append(result.getTopologyId()).append(")\n");
+            sb.append("  Status: Successfully ").append(actionStr).append(" (").append(network.nodeCount()).append(" nodes, ").append(network.linkCount()).append(" links)\n\n");
+
+            if (result.hasSimulationRun()) {
+                sb.append("• Simulation Run: Recorded as Run #").append(result.getSimulationRunId()).append("\n");
+                sb.append("  Metrics: ").append(statsToRecord.getTotalPackets()).append(" packets (")
+                  .append(statsToRecord.getDeliveredCount()).append(" delivered, ratio: ")
+                  .append(String.format("%.1f%%", statsToRecord.getDeliveryRatio())).append("), ")
+                  .append(ticks).append(" ticks");
+            } else if (hasSimulationActivity()) {
+                sb.append("• Simulation Run: Current simulation state was previously saved (Run ID: #")
+                  .append(lastSavedRunId != null ? lastSavedRunId : "N/A")
+                  .append("). No duplicate run inserted.");
+            } else {
+                sb.append("• Simulation Run: No simulation activity to record.");
+            }
+
+            if (!skipConfirmationForTesting) {
+                JOptionPane.showMessageDialog(this, sb.toString(), "Save Successful", JOptionPane.INFORMATION_MESSAGE);
+            }
+
+            log(String.format("[Database Save] Topology '%s' (ID #%d) %s.%s",
+                    result.getTopologyName(),
+                    result.getTopologyId(),
+                    actionStr,
+                    result.hasSimulationRun() ? " Simulation run #" + result.getSimulationRunId() + " recorded." : ""
+            ));
+
+            setStatusBadge("Saved (ID #" + result.getTopologyId() + ")", Theme.STATUS_SUCCESS);
+
             if (historyPage != null) {
                 historyPage.refresh();
             }
             return true;
+
         } catch (DuplicateTopologyNameException e) {
             if (skipConfirmationForTesting) {
                 log("[Duplicate Name] Test mode detected conflict for: " + name);
@@ -998,9 +1320,9 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
                     log("[Save Cancelled] Overwrite of topology '" + name + "' cancelled by user.");
                     return false;
                 }
-                return executeSaveTopology(name, description, true);
+                return executeUnifiedSave(e.getExistingTopologyId(), name, description, true, runNotes);
             } else if (choice == 1) { // Rename
-                return promptAndSaveTopology(name + "_copy", description);
+                return promptAndSaveNewTopology(name + "_copy", description);
             } else { // Cancel
                 log("[Save Cancelled] Save cancelled due to name conflict: " + name);
                 return false;
@@ -1009,15 +1331,24 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
             if (!skipConfirmationForTesting) {
                 JOptionPane.showMessageDialog(
                         this,
-                        "Failed to save topology to MySQL database:\n" + e.getMessage(),
-                        "Database Error",
+                        "Failed to save to MySQL database:\n" + e.getMessage()
+                                + "\n\nCurrent in-memory network and simulation state are preserved. You may retry.",
+                        "Save Failed",
                         JOptionPane.ERROR_MESSAGE
                 );
             }
-            log("[Database Error] Failed to save topology: " + e.getMessage());
+            log("[Database Error] Save failed: " + e.getMessage());
             setStatusBadge("Save Error", Theme.STATUS_ERROR);
             return false;
         }
+    }
+
+    public boolean promptAndSaveTopology(String initialName, String initialDescription) {
+        return promptAndSaveNewTopology(initialName, initialDescription);
+    }
+
+    public boolean executeSaveTopology(String name, String description, boolean overwrite) {
+        return executeUnifiedSave(null, name, description, overwrite, null);
     }
 
     public boolean handleLoadTopology(int id, String name) {
@@ -1053,24 +1384,13 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
             }
 
             com.netroute.repository.SavedTopology saved = loadedOpt.get();
-            Network loadedNetwork = saved.getNetwork();
-
-            this.network = loadedNetwork;
-            this.router = new DijkstraRouter();
-            this.engine = new SimulationEngine(this.network, this.router);
+            setNetwork(saved.getNetwork());
             this.activeTopologyId = id;
             this.activeTopologyName = saved.getName();
+            this.activeTopologyDescription = saved.getDescription();
+            this.topologyModified = false;
             this.currentRunSaved = false;
             this.lastSavedRunId = null;
-
-            this.topologyPanel.setNetwork(this.network);
-            this.topologyPanel.clearHighlightedRoute();
-            this.topologyPanel.setSelectedEndpoints(null, null);
-
-            this.controlPanel.populate(this.network);
-            this.controlPanel.setRouteResult("", false);
-
-            this.statisticsPanel.updateStatistics(new NetworkStatistics(this.engine));
 
             showSimulatorPage();
 
@@ -1171,15 +1491,7 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
     }
 
     private void markTopologyModified() {
-        this.activeTopologyId = null;
-        if (this.activeTopologyName != null && !this.activeTopologyName.endsWith("(Modified)")) {
-            this.activeTopologyName = this.activeTopologyName + " (Modified)";
-        }
-    }
-
-    @Override
-    public void onFinishAndSaveRun() {
-        promptAndSaveSimulationRun(null);
+        this.topologyModified = true;
     }
 
     public boolean promptAndSaveSimulationRun(String initialNotes) {
@@ -1380,12 +1692,67 @@ public class NetRouteFrame extends JFrame implements ControlPanel.Listener, Land
         return lastSavedRunId;
     }
 
+    public void setLastSavedRunId(Integer lastSavedRunId) {
+        this.lastSavedRunId = lastSavedRunId;
+    }
+
+    public void setCurrentRunSaved(boolean currentRunSaved) {
+        this.currentRunSaved = currentRunSaved;
+    }
+
+    public String getActiveTopologyDescription() {
+        return activeTopologyDescription;
+    }
+
+    public void setActiveTopologyDescription(String activeTopologyDescription) {
+        this.activeTopologyDescription = activeTopologyDescription;
+    }
+
+    public boolean isTopologyModified() {
+        return topologyModified;
+    }
+
+    public void setTopologyModified(boolean topologyModified) {
+        this.topologyModified = topologyModified;
+    }
+
+    public boolean hasSimulationActivity() {
+        return engine != null && (!engine.getPackets().isEmpty() || engine.getCurrentTime() > 0);
+    }
+
+    public boolean isSimulationActivityUnsaved() {
+        return hasSimulationActivity() && !currentRunSaved;
+    }
+
     public HistoryPage getHistoryPage() {
         return historyPage;
     }
 
     public boolean isSkipConfirmationForTesting() {
         return skipConfirmationForTesting;
+    }
+
+    public void setNetwork(Network network) {
+        this.network = java.util.Objects.requireNonNull(network, "network is required");
+        this.graphManager = new GraphManager(this.network);
+        this.router = new DijkstraRouter();
+        this.engine = new SimulationEngine(this.network, this.router);
+        if (this.topologyPanel != null) {
+            this.topologyPanel.setNetwork(this.network);
+            this.topologyPanel.clearHighlightedRoute();
+            this.topologyPanel.setSelectedEndpoints(null, null);
+        }
+        if (this.controlPanel != null) {
+            this.controlPanel.populate(this.network);
+            this.controlPanel.setRouteResult("", false);
+        }
+        if (this.statisticsPanel != null) {
+            this.statisticsPanel.updateStatistics(new NetworkStatistics(this.engine));
+        }
+    }
+
+    public GraphManager getGraphManager() {
+        return graphManager;
     }
 
     public Network getNetwork() {

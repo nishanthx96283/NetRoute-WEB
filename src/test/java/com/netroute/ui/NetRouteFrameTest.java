@@ -314,8 +314,8 @@ class NetRouteFrameTest {
         }
 
         ControlPanel panel = new ControlPanel();
-        assertNotNull(panel.getBtnSaveTopology(), "ControlPanel must have Save Topology button");
-        assertTrue(panel.getBtnSaveTopology().getText().contains("Save Topology"));
+        assertNotNull(panel.getBtnSave(), "ControlPanel must have Save button");
+        assertTrue(panel.getBtnSave().getText().contains("Save"));
 
         boolean[] called = {false};
         panel.setListener(new ControlPanel.Listener() {
@@ -330,12 +330,11 @@ class NetRouteFrameTest {
             @Override public void onConnectNodes(String a, String b, double cost) {}
             @Override public void onDeleteNode(String nodeId) {}
             @Override public void onDeleteLink(String linkId) {}
-            @Override public void onSaveTopology() { called[0] = true; }
-            @Override public void onFinishAndSaveRun() {}
+            @Override public void onSave() { called[0] = true; }
         });
 
-        panel.triggerSaveTopology();
-        assertTrue(called[0], "triggerSaveTopology() must invoke onSaveTopology on listener");
+        panel.triggerSave();
+        assertTrue(called[0], "triggerSave() must invoke onSave on listener");
     }
 
     @Test
@@ -522,8 +521,8 @@ class NetRouteFrameTest {
         }
 
         ControlPanel panel = new ControlPanel();
-        assertNotNull(panel.getBtnFinishRun(), "ControlPanel must have Finish & Save Run button");
-        assertTrue(panel.getBtnFinishRun().getText().contains("Finish & Save Run"));
+        assertNotNull(panel.getBtnFinishRun(), "ControlPanel must provide backward-compatible getBtnFinishRun()");
+        assertTrue(panel.getBtnFinishRun().getText().contains("Save"));
 
         boolean[] called = {false};
         panel.setListener(new ControlPanel.Listener() {
@@ -538,12 +537,11 @@ class NetRouteFrameTest {
             @Override public void onConnectNodes(String a, String b, double cost) {}
             @Override public void onDeleteNode(String nodeId) {}
             @Override public void onDeleteLink(String linkId) {}
-            @Override public void onSaveTopology() {}
-            @Override public void onFinishAndSaveRun() { called[0] = true; }
+            @Override public void onSave() { called[0] = true; }
         });
 
         panel.triggerFinishAndSaveRun();
-        assertTrue(called[0], "triggerFinishAndSaveRun() must invoke onFinishAndSaveRun on listener");
+        assertTrue(called[0], "triggerFinishAndSaveRun() must delegate to save action on listener");
     }
 
     @Test
@@ -771,7 +769,7 @@ class NetRouteFrameTest {
     }
 
     @Test
-    void modifiedTopologyDisassociatesFromSavedTopologyId() throws Exception {
+    void modifiedTopologyPreservesSavedTopologyIdAndMarksModified() throws Exception {
         if (GraphicsEnvironment.isHeadless()) {
             return;
         }
@@ -791,11 +789,12 @@ class NetRouteFrameTest {
 
             frame.handleLoadTopology(topId, topName);
             assertEquals(topId, frame.getActiveTopologyId());
+            assertFalse(frame.isTopologyModified());
 
             // Modify topology dynamically by adding a node
             frame.onAddNode(NodeType.COMPUTER);
-            assertNull(frame.getActiveTopologyId(), "Active topology ID must become null when topology is modified");
-            assertTrue(frame.getActiveTopologyName().contains("(Modified)"));
+            assertEquals(topId, frame.getActiveTopologyId(), "Active topology ID must be preserved when loaded topology is modified");
+            assertTrue(frame.isTopologyModified(), "Topology must be marked modified");
 
             // Run simulation on modified topology
             frame.onSendPacket("MC1", "MS1");
@@ -804,8 +803,7 @@ class NetRouteFrameTest {
 
             Optional<SimulationRunRecord> runOpt = frame.getStorageService().getRunById(frame.getLastSavedRunId());
             assertTrue(runOpt.isPresent());
-            assertNull(runOpt.get().getTopologyId(), "Modified network run must NOT be associated with original topology ID");
-            assertTrue(runOpt.get().getTopologyName().contains("(Modified)"));
+            assertEquals(topId, runOpt.get().getTopologyId(), "Run must be associated with active topology ID");
 
             // Cleanup
             frame.getStorageService().deleteTopologyPermanently(topId);

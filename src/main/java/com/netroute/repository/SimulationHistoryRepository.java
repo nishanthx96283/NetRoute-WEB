@@ -46,6 +46,31 @@ public class SimulationHistoryRepository {
             NetworkStatistics stats,
             long simulationTicks,
             String notes) throws SQLException {
+        try (Connection conn = databaseConnection.getConnection()) {
+            return recordSimulationRunInternal(conn, topologyId, topologyName, stats, simulationTicks, notes);
+        }
+    }
+
+    /**
+     * Records a historical snapshot of simulation performance using an existing JDBC connection.
+     * Allows participation in atomic multi-operation transactions (e.g. unified save).
+     *
+     * @param conn active JDBC connection
+     * @param topologyId optional ID of the topology on which the simulation ran (nullable)
+     * @param topologyName display name of the topology at the time of execution
+     * @param stats current network statistics object
+     * @param simulationTicks current simulation clock tick counter
+     * @param notes optional run description or scenario notes
+     * @return generated simulation run ID
+     */
+    public int recordSimulationRunInternal(
+            Connection conn,
+            Integer topologyId,
+            String topologyName,
+            NetworkStatistics stats,
+            long simulationTicks,
+            String notes) throws SQLException {
+        Objects.requireNonNull(conn, "conn is required");
         Objects.requireNonNull(topologyName, "topologyName is required");
         Objects.requireNonNull(stats, "stats is required");
 
@@ -54,8 +79,7 @@ public class SimulationHistoryRepository {
                 + "delivery_ratio, avg_delivery_delay, link_failures, reroutes, notes) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-        try (Connection conn = databaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             if (topologyId != null && topologyId > 0) {
                 ps.setInt(1, topologyId);
             } else {

@@ -42,8 +42,13 @@ public class ControlPanel extends JPanel {
         void onConnectNodes(String sourceId, String destinationId, double cost);
         void onDeleteNode(String nodeId);
         void onDeleteLink(String linkId);
-        void onSaveTopology();
-        void onFinishAndSaveRun();
+        default void onSave() {}
+        default void onSaveTopology() {
+            onSave();
+        }
+        default void onFinishAndSaveRun() {
+            onSave();
+        }
     }
 
     private final JComboBox<String> cmbSource = new JComboBox<>();
@@ -420,18 +425,16 @@ public class ControlPanel extends JPanel {
         return panel;
     }
 
-    private JButton btnSaveTopology;
-    private JButton btnFinishRun;
+    private JButton btnSave;
 
     private JPanel createSimulationActionPanel() {
-        JPanel panel = new JPanel(new GridLayout(2, 2, 8, 6));
+        JPanel panel = new JPanel(new GridLayout(1, 3, 8, 6));
         panel.setBackground(Theme.BG_PANEL);
         panel.setBorder(Theme.createTitledBorder("Simulation & Persistence Controls"));
 
         JButton btnStep = Theme.createButton("Step 1 Tick", Theme.ButtonStyle.SECONDARY);
         JButton btnReset = Theme.createButton("Reset Network", Theme.ButtonStyle.SECONDARY);
-        btnSaveTopology = Theme.createButton("💾 Save Topology", Theme.ButtonStyle.PRIMARY);
-        btnFinishRun = Theme.createButton("📊 Finish & Save Run", Theme.ButtonStyle.SUCCESS);
+        btnSave = Theme.createButton("💾 Save", Theme.ButtonStyle.PRIMARY);
 
         btnStep.addActionListener(e -> {
             if (listener != null) {
@@ -445,43 +448,54 @@ public class ControlPanel extends JPanel {
             }
         });
 
-        btnSaveTopology.addActionListener(e -> {
+        btnSave.addActionListener(e -> {
             if (listener != null) {
-                listener.onSaveTopology();
-            }
-        });
-
-        btnFinishRun.addActionListener(e -> {
-            if (listener != null) {
-                listener.onFinishAndSaveRun();
+                listener.onSave();
             }
         });
 
         panel.add(btnStep);
         panel.add(btnReset);
-        panel.add(btnSaveTopology);
-        panel.add(btnFinishRun);
+        panel.add(btnSave);
         return panel;
     }
 
+    public JButton getBtnSave() {
+        return btnSave;
+    }
+
+    public void triggerSave() {
+        if (listener != null) {
+            listener.onSave();
+        }
+    }
+
+    /**
+     * Backwards-compatible alias for {@link #getBtnSave()}.
+     */
     public JButton getBtnSaveTopology() {
-        return btnSaveTopology;
+        return btnSave;
     }
 
+    /**
+     * Backwards-compatible alias for {@link #triggerSave()}.
+     */
     public void triggerSaveTopology() {
-        if (listener != null) {
-            listener.onSaveTopology();
-        }
+        triggerSave();
     }
 
+    /**
+     * Backwards-compatible alias for {@link #getBtnSave()}.
+     */
     public JButton getBtnFinishRun() {
-        return btnFinishRun;
+        return btnSave;
     }
 
+    /**
+     * Backwards-compatible alias for {@link #triggerSave()}.
+     */
     public void triggerFinishAndSaveRun() {
-        if (listener != null) {
-            listener.onFinishAndSaveRun();
-        }
+        triggerSave();
     }
 
     private static String extractLinkId(String text) {

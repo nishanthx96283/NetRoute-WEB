@@ -8,6 +8,7 @@ import com.netroute.repository.SimulationHistoryRepository;
 import com.netroute.repository.SimulationRunRecord;
 import com.netroute.repository.TopologyRepository;
 import com.netroute.repository.TopologySummary;
+import com.netroute.repository.UnifiedSaveResult;
 import com.netroute.statistics.NetworkStatistics;
 
 import java.sql.SQLException;
@@ -33,8 +34,8 @@ public class TopologyStorageService {
 
     public TopologyStorageService(DatabaseConnection databaseConnection) {
         this.databaseConnection = Objects.requireNonNull(databaseConnection, "databaseConnection is required");
-        this.topologyRepository = new TopologyRepository(databaseConnection);
         this.historyRepository = new SimulationHistoryRepository(databaseConnection);
+        this.topologyRepository = new TopologyRepository(databaseConnection, this.historyRepository);
     }
 
     public TopologyStorageService(
@@ -80,6 +81,41 @@ public class TopologyStorageService {
             throw new IllegalArgumentException("Cannot save an empty network.");
         }
         return topologyRepository.saveTopology(name.trim(), description, network, overwrite);
+    }
+
+    /**
+     * Executes a unified save workflow within a single atomic database transaction.
+     * Persists or updates the network topology and optionally records current simulation metrics.
+     *
+     * @param topologyId optional ID of an existing loaded topology to overwrite (nullable)
+     * @param name display name for the topology (required)
+     * @param description optional description
+     * @param network in-memory network graph containing nodes and links (required)
+     * @param overwriteIfExists whether to overwrite if a name conflict is encountered
+     * @param statsToRecord optional simulation statistics to persist alongside the topology (nullable)
+     * @param simulationTicks simulation clock ticks
+     * @param runNotes optional scenario description or notes
+     * @return {@link UnifiedSaveResult} containing resulting topology ID and simulation run ID
+     */
+    public UnifiedSaveResult saveUnified(
+            Integer topologyId,
+            String name,
+            String description,
+            Network network,
+            boolean overwriteIfExists,
+            NetworkStatistics statsToRecord,
+            long simulationTicks,
+            String runNotes) throws SQLException, DuplicateTopologyNameException {
+        if (name == null || name.trim().isEmpty()) {
+            throw new IllegalArgumentException("Topology name cannot be empty.");
+        }
+        if (network == null || network.nodeCount() == 0) {
+            throw new IllegalArgumentException("Cannot save an empty network.");
+        }
+        return topologyRepository.saveUnified(
+                topologyId, name.trim(), description, network, overwriteIfExists,
+                statsToRecord, simulationTicks, runNotes
+        );
     }
 
     /**

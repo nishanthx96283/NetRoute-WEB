@@ -8,6 +8,8 @@ import com.netroute.model.NodeType;
 import com.netroute.model.Router;
 import com.netroute.model.Server;
 
+import com.netroute.statistics.NetworkStatistics;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -26,6 +28,7 @@ import java.util.Optional;
  * Key design features:
  * <ul>
  *   <li>Atomic transactions with rollback on failure to prevent partial saves.</li>
+ *   <li>Unified save workflow coordinating topology update/creation and simulation metrics on a single connection.</li>
  *   <li>Duplicate name handling supporting Cancel, Rename, or explicit Overwrite.</li>
  *   <li>Full graph reconstruction (node types, names, coordinates, link costs, delays, capacities, active state).</li>
  *   <li>Both soft-archival and permanent deletion policies.</li>
@@ -34,13 +37,20 @@ import java.util.Optional;
 public class TopologyRepository {
 
     private final DatabaseConnection databaseConnection;
+    private final SimulationHistoryRepository historyRepository;
 
     public TopologyRepository(DatabaseConnection databaseConnection) {
+        this(databaseConnection, new SimulationHistoryRepository(databaseConnection));
+    }
+
+    public TopologyRepository(DatabaseConnection databaseConnection, SimulationHistoryRepository historyRepository) {
         this.databaseConnection = Objects.requireNonNull(databaseConnection, "databaseConnection is required");
+        this.historyRepository = Objects.requireNonNull(historyRepository, "historyRepository is required");
     }
 
     /**
      * Saves a network topology into MySQL within a single atomic transaction.
+     * Backwards-compatible convenience method delegating to {@link #saveUnified}.
      *
      * @param name unique name for the topology
      * @param description optional notes or summary
@@ -52,6 +62,41 @@ public class TopologyRepository {
      */
     public int saveTopology(String name, String description, Network network, boolean overwriteIfExists)
             throws SQLException, DuplicateTopologyNameException {
+        UnifiedSaveResult result = saveUnified(null, name, description, network, overwriteIfExists, null, 0, null);
+        return result.getTopologyId();
+    }
+
+    /**
+     * Executes a unified save workflow within a single atomic transaction on a single JDBC connection.
+     * <p>
+     * Supports:
+     * <ul>
+     *   <li>Overwriting a previously loaded topology by ID (Case A)</li>
+     *   <li>Saving a new topology or resolving name conflicts (Case B)</li>
+     *   <li>Persisting optional simulation run analytics along with the topology</li>
+     * </ul>
+     *
+     * @param topologyId optional ID of an existing loaded topology to overwrite (nullable)
+     * @param name display name for the topology (required)
+     * @param description optional description
+     * @param network in-memory network graph containing nodes and links (required)
+     * @param overwriteIfExists whether to overwrite an existing topology if name conflicts
+     * @param statsToRecord optional simulation statistics to persist alongside the topology (nullable)
+     * @param simulationTicks simulation ticks counter for the run
+     * @param runNotes optional notes for the simulation run
+     * @return {@link UnifiedSaveResult} detailing the saved topology and simulation run ID
+     * @throws DuplicateTopologyNameException if name already exists under a different ID and overwrite is false
+     * @throws SQLException on database error
+     */
+    public UnifiedSaveResult saveUnified(
+            Integer topologyId,
+            String name,
+            String description,
+            Network network,
+            boolean overwriteIfExists,
+            NetworkStatistics statsToRecord,
+            long simulationTicks,
+            String runNotes) throws SQLException, DuplicateTopologyNameException {
         Objects.requireNonNull(name, "name is required");
         Objects.requireNonNull(network, "network is required");
 
@@ -59,60 +104,110 @@ public class TopologyRepository {
         if (trimmedName.isEmpty()) {
             throw new IllegalArgumentException("Topology name cannot be empty");
         }
+        if (network.nodeCount() == 0) {
+            throw new IllegalArgumentException("Cannot save an empty network");
+        }
 
         try (Connection conn = databaseConnection.getConnection()) {
             boolean originalAutoCommit = conn.getAutoCommit();
             conn.setAutoCommit(false);
 
             try {
-                // Check if name already exists
-                Optional<TopologySummary> existing = findSummaryByNameInternal(conn, trimmedName);
-                int topologyId;
+                int targetTopologyId;
+                String targetTopologyName;
+                boolean created;
 
-                if (existing.isPresent()) {
-                    if (!overwriteIfExists) {
-                        conn.rollback();
-                        throw new DuplicateTopologyNameException(trimmedName, existing.get().getId());
+                if (topologyId != null && topologyId > 0) {
+                    // Case A: Overwrite existing topology by ID
+                    Optional<TopologySummary> existingById = findSummaryByIdInternal(conn, topologyId);
+                    if (existingById.isEmpty()) {
+                        throw new SQLException("Topology with ID " + topologyId + " was not found in the database.");
                     }
-                    topologyId = existing.get().getId();
 
-                    // Update existing topology header
-                    String sqlUpdate = "UPDATE topologies SET description = ?, node_count = ?, link_count = ?, "
+                    // Check if renaming to a name already used by a DIFFERENT topology
+                    Optional<TopologySummary> existingByName = findSummaryByNameInternal(conn, trimmedName);
+                    if (existingByName.isPresent() && existingByName.get().getId() != topologyId) {
+                        if (!overwriteIfExists) {
+                            conn.rollback();
+                            throw new DuplicateTopologyNameException(trimmedName, existingByName.get().getId());
+                        }
+                    }
+
+                    targetTopologyId = topologyId;
+                    targetTopologyName = trimmedName;
+                    created = false;
+
+                    String sqlUpdate = "UPDATE topologies SET name = ?, description = ?, node_count = ?, link_count = ?, "
                             + "is_archived = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
                     try (PreparedStatement psUpdate = conn.prepareStatement(sqlUpdate)) {
-                        psUpdate.setString(1, description == null ? "" : description.trim());
-                        psUpdate.setInt(2, network.nodeCount());
-                        psUpdate.setInt(3, network.linkCount());
-                        psUpdate.setInt(4, topologyId);
+                        psUpdate.setString(1, targetTopologyName);
+                        psUpdate.setString(2, description == null ? "" : description.trim());
+                        psUpdate.setInt(3, network.nodeCount());
+                        psUpdate.setInt(4, network.linkCount());
+                        psUpdate.setInt(5, targetTopologyId);
                         psUpdate.executeUpdate();
                     }
 
                     // Remove old links and nodes before re-inserting
                     try (PreparedStatement psDelLinks = conn.prepareStatement("DELETE FROM topology_links WHERE topology_id = ?")) {
-                        psDelLinks.setInt(1, topologyId);
+                        psDelLinks.setInt(1, targetTopologyId);
                         psDelLinks.executeUpdate();
                     }
                     try (PreparedStatement psDelNodes = conn.prepareStatement("DELETE FROM topology_nodes WHERE topology_id = ?")) {
-                        psDelNodes.setInt(1, topologyId);
+                        psDelNodes.setInt(1, targetTopologyId);
                         psDelNodes.executeUpdate();
                     }
                 } else {
-                    // Insert new topology header
-                    String sqlInsert = "INSERT INTO topologies (name, description, node_count, link_count, is_archived) "
-                            + "VALUES (?, ?, ?, ?, FALSE)";
-                    try (PreparedStatement psInsert = conn.prepareStatement(sqlInsert, Statement.RETURN_GENERATED_KEYS)) {
-                        psInsert.setString(1, trimmedName);
-                        psInsert.setString(2, description == null ? "" : description.trim());
-                        psInsert.setInt(3, network.nodeCount());
-                        psInsert.setInt(4, network.linkCount());
-                        psInsert.executeUpdate();
-
-                        try (ResultSet rsKeys = psInsert.getGeneratedKeys()) {
-                            if (!rsKeys.next()) {
-                                throw new SQLException("Failed to obtain generated topology ID.");
-                            }
-                            topologyId = rsKeys.getInt(1);
+                    // Case B: New topology or overwrite by name
+                    Optional<TopologySummary> existing = findSummaryByNameInternal(conn, trimmedName);
+                    if (existing.isPresent()) {
+                        if (!overwriteIfExists) {
+                            conn.rollback();
+                            throw new DuplicateTopologyNameException(trimmedName, existing.get().getId());
                         }
+                        targetTopologyId = existing.get().getId();
+                        targetTopologyName = trimmedName;
+                        created = false;
+
+                        String sqlUpdate = "UPDATE topologies SET description = ?, node_count = ?, link_count = ?, "
+                                + "is_archived = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
+                        try (PreparedStatement psUpdate = conn.prepareStatement(sqlUpdate)) {
+                            psUpdate.setString(1, description == null ? "" : description.trim());
+                            psUpdate.setInt(2, network.nodeCount());
+                            psUpdate.setInt(3, network.linkCount());
+                            psUpdate.setInt(4, targetTopologyId);
+                            psUpdate.executeUpdate();
+                        }
+
+                        // Remove old links and nodes before re-inserting
+                        try (PreparedStatement psDelLinks = conn.prepareStatement("DELETE FROM topology_links WHERE topology_id = ?")) {
+                            psDelLinks.setInt(1, targetTopologyId);
+                            psDelLinks.executeUpdate();
+                        }
+                        try (PreparedStatement psDelNodes = conn.prepareStatement("DELETE FROM topology_nodes WHERE topology_id = ?")) {
+                            psDelNodes.setInt(1, targetTopologyId);
+                            psDelNodes.executeUpdate();
+                        }
+                    } else {
+                        // Insert new topology header
+                        String sqlInsert = "INSERT INTO topologies (name, description, node_count, link_count, is_archived) "
+                                + "VALUES (?, ?, ?, ?, FALSE)";
+                        try (PreparedStatement psInsert = conn.prepareStatement(sqlInsert, Statement.RETURN_GENERATED_KEYS)) {
+                            psInsert.setString(1, trimmedName);
+                            psInsert.setString(2, description == null ? "" : description.trim());
+                            psInsert.setInt(3, network.nodeCount());
+                            psInsert.setInt(4, network.linkCount());
+                            psInsert.executeUpdate();
+
+                            try (ResultSet rsKeys = psInsert.getGeneratedKeys()) {
+                                if (!rsKeys.next()) {
+                                    throw new SQLException("Failed to obtain generated topology ID.");
+                                }
+                                targetTopologyId = rsKeys.getInt(1);
+                            }
+                        }
+                        targetTopologyName = trimmedName;
+                        created = true;
                     }
                 }
 
@@ -121,7 +216,7 @@ public class TopologyRepository {
                         + "VALUES (?, ?, ?, ?, ?, ?)";
                 try (PreparedStatement psNode = conn.prepareStatement(sqlNode)) {
                     for (NetworkNode node : network.getNodes().values()) {
-                        psNode.setInt(1, topologyId);
+                        psNode.setInt(1, targetTopologyId);
                         psNode.setString(2, node.getId());
                         psNode.setString(3, node.getName());
                         psNode.setString(4, node.getType().name());
@@ -137,7 +232,7 @@ public class TopologyRepository {
                         + "cost, delay, capacity, is_active, is_directed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 try (PreparedStatement psLink = conn.prepareStatement(sqlLink)) {
                     for (NetworkLink link : network.getLinks().values()) {
-                        psLink.setInt(1, topologyId);
+                        psLink.setInt(1, targetTopologyId);
                         psLink.setString(2, link.getId());
                         psLink.setString(3, link.getSourceId());
                         psLink.setString(4, link.getDestinationId());
@@ -151,8 +246,21 @@ public class TopologyRepository {
                     psLink.executeBatch();
                 }
 
+                // Simulation run persistence within the SAME transaction
+                Integer simulationRunId = null;
+                if (statsToRecord != null) {
+                    simulationRunId = historyRepository.recordSimulationRunInternal(
+                            conn,
+                            targetTopologyId,
+                            targetTopologyName,
+                            statsToRecord,
+                            simulationTicks,
+                            runNotes
+                    );
+                }
+
                 conn.commit();
-                return topologyId;
+                return new UnifiedSaveResult(targetTopologyId, targetTopologyName, created, simulationRunId);
             } catch (SQLException | RuntimeException e) {
                 conn.rollback();
                 throw e;
