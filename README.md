@@ -1,381 +1,338 @@
-# NetRoute — Network Traffic & Routing Simulator
+# NetRoute — Network Traffic & Routing Simulator (Web & Desktop)
 
 **Every Node Has a Path. Every Packet Has a Purpose.**
 
-NetRoute is a Java-based network simulation application that models computer networks, calculates efficient routes, simulates packet transmission, and demonstrates how networks respond to link failures. It provides a graphical interface for building network topologies, monitoring simulation statistics, and saving network configurations and simulation history to a MySQL database.
+NetRoute is a high-performance network simulation platform designed to model computer networks, compute optimal paths using Dijkstra's algorithm, simulate discrete-event packet delivery with queuing and link capacity constraints, evaluate dynamic fault recovery under link failures, and persist network topologies and analytics into a relational MySQL database.
 
-## Table of Contents
-
-- [Overview]
-- [Features]
-- [Technology Stack]
-- [System Architecture]
-- [Project Structure]
-- [How Routing Works]
-- [Database Design]
-- [Prerequisites]
-- [Database Setup]
-- [Build and Run]
-- [Using NetRoute]
-- [Testing]
-- [Learning Outcomes]
-- [Future Enhancements]
-- [Academic Information]
-
-## Overview
-
-Computer networks consist of interconnected devices that exchange data through communication links. Selecting an efficient path between devices is important for reliable and effective data transmission.
-
-NetRoute provides an interactive environment to understand network topology, shortest-path routing, packet movement, link failures, and route recovery. Instead of working only with theoretical network diagrams, users can create and modify a network and observe the effects of routing decisions and failures through a graphical interface.
-
-The application combines graph algorithms, object-oriented programming, simulation, data persistence, and visualization in a single desktop application.
-
-## Features
-
-### Network Topology Management
-- Create and manage network nodes such as computers, routers, and servers.
-- Add and remove network links.
-- Configure link costs.
-- Represent networks using graph data structures.
-- Support directed and undirected links.
-- Enable or disable links to represent network failures.
-
-### Shortest-Path Routing
-- Calculate routes using Dijkstra's shortest-path algorithm.
-- Use link costs to determine efficient paths.
-- Represent the network using an adjacency-list structure.
-- Recalculate routes when the network topology changes.
-
-### Packet Simulation
-- Simulate packet transmission across network links.
-- Run a simulation or advance it one tick at a time.
-- Track packet status and simulation activity.
-- Observe how packets move through the network.
-
-### Failure and Recovery Simulation
-- Simulate network link failures.
-- Restore failed links.
-- Observe alternative routing paths when the topology changes.
-- Track the current number of failed links in simulation statistics.
-
-### Statistics and Visualization
-- Display network topology graphically.
-- View routing and simulation information.
-- Monitor relevant network and packet statistics.
-- Randomize link costs to experiment with different routing outcomes.
-
-### Persistence and History
-- Save network topologies to a MySQL database.
-- Load previously saved topologies.
-- Delete saved topologies.
-- Save simulation run metrics.
-- Browse simulation history and inspect saved run details.
-- Maintain topology records and simulation history independently.
-
-### Desktop Interface
-- Java Swing-based graphical user interface.
-- Interactive topology visualization using Java2D.
-- Separate pages for the main application, topology history, simulation history, and project information.
-
-## Technology Stack
-
-| Technology | Purpose |
-|---|---|
-| Java | Core application logic and object-oriented design |
-| Java Swing | Desktop graphical user interface |
-| Java2D | Network topology visualization |
-| Graph Data Structures | Network representation using adjacency lists |
-| Dijkstra's Algorithm | Shortest-path routing |
-| PriorityQueue | Efficient selection of the next routing candidate |
-| MySQL | Persistent storage of topologies and simulation runs |
-| JDBC | Communication between Java and MySQL |
-| Maven | Dependency management, building, and testing |
-| JUnit | Automated unit testing |
-
-## System Architecture
-
-NetRoute follows a modular architecture that separates the user interface, network model, routing logic, simulation engine, and database operations.
-
-```text
-+--------------------------------------+
-|         Java Swing User Interface    |
-| Control Panel | Topology | Statistics|
-+-------------------+------------------+
-                    |
-                    v
-+--------------------------------------+
-|          Network Model               |
-| Nodes | Links | Graph Representation |
-+-------------------+------------------+
-                    |
-                    v
-+--------------------------------------+
-|         Routing Module               |
-|       Dijkstra's Algorithm           |
-+-------------------+------------------+
-                    |
-                    v
-+--------------------------------------+
-|        Simulation Engine             |
-| Packet Movement | Failures | Recovery|
-+-------------------+------------------+
-                    |
-                    v
-+--------------------------------------+
-|       Statistics and Persistence     |
-| Metrics | Services | Repositories    |
-+-------------------+------------------+
-                    |
-                    v
-+--------------------------------------+
-|             MySQL Database           |
-| Topologies | Nodes | Links | Runs    |
-+--------------------------------------+
-```
-
-### Major Components
-
-- **Model:** Defines network nodes, links, packets, routes, and related entities.
-- **Graph:** Manages network connectivity and adjacency-list representation.
-- **Routing:** Calculates shortest paths using Dijkstra's algorithm.
-- **Simulation:** Handles packet transmission, link failures, restoration, and rerouting.
-- **Statistics:** Calculates and maintains simulation metrics.
-- **Service and Repository:** Coordinate application operations and database persistence.
-- **User Interface:** Provides interactive controls and graphical network visualization.
-- **Database:** Stores network configurations and simulation history.
-
-## Project Structure
-
-The main Java packages are organized by responsibility.
-
-```text
-NetRoute/
-├── src/
-│   ├── main/
-│   │   ├── java/
-│   │   │   └── com/
-│   │   │       └── netroute/
-│   │   │           ├── model/
-│   │   │           ├── graph/
-│   │   │           ├── routing/
-│   │   │           ├── simulation/
-│   │   │           ├── statistics/
-│   │   │           ├── repository/
-│   │   │           ├── service/
-│   │   │           ├── ui/
-│   │   │           └── Main.java
-│   │   └── resources/
-│   └── test/
-├── db.properties.example
-├── .gitignore
-├── mvnw
-├── mvnw.cmd
-├── pom.xml
-└── README.md
-```
-
-The structure above illustrates the main package organization. Individual files and resources may vary with the current implementation.
-
-## How Routing Works
-
-NetRoute uses Dijkstra's shortest-path algorithm to calculate a minimum-cost route between network nodes.
-
-The algorithm works as follows:
-
-1. Assign a distance of zero to the source node.
-2. Assign an initial distance of infinity to the remaining nodes.
-3. Select the unprocessed node with the smallest known distance.
-4. Examine its outgoing links.
-5. Update neighboring distances whenever a lower-cost route is discovered.
-6. Repeat until the destination is reached or no reachable nodes remain.
-7. Reconstruct the route using the recorded predecessor information.
-
-A priority queue helps efficiently select the next node to process.
-
-For a graph with non-negative edge weights, Dijkstra's algorithm is appropriate for shortest-path routing. The precise time complexity depends on the graph representation and priority-queue implementation.
-
-When a link fails, the network's available connectivity changes. The application can recalculate the route so that packets can use an alternative path when one exists.
-
-## Database Design
-
-NetRoute uses MySQL to persist topology configurations and simulation history.
-
-| Table | Purpose |
-|---|---|
-| `topologies` | Stores saved network topology information |
-| `topology_nodes` | Stores nodes belonging to saved topologies |
-| `topology_links` | Stores links and associated link information |
-| `simulation_runs` | Stores simulation run metrics and history |
-
-Topology records are associated with their nodes and links. The database schema uses relationships to maintain consistency between saved topologies and their associated data.
-
-Simulation history preserves recorded run information independently of the active simulation. Depending on the database relationship and deletion behavior, a historical run may remain available even after its associated topology is deleted.
-
-## Prerequisites
-
-Install the following software before building the application:
-
-- Java Development Kit (JDK) compatible with the project's configured Java version.
-- MySQL Server.
-- Git, if cloning the repository.
-- A terminal or IDE such as IntelliJ IDEA or Visual Studio Code.
-
-The repository includes a Maven wrapper, so a separate Maven installation may not be necessary.
-
-## Database Setup
-
-1. Install and start MySQL Server.
-2. Create the database:
-
-   ```sql
-   CREATE DATABASE netroute_db;
-   ```
-
-3. Configure the database connection using the project's supported configuration mechanism.
-4. Use `db.properties.example` as a reference for the expected configuration keys.
-5. If the application does not initialize the schema automatically, execute the project's schema SQL file before running it.
-
-Keep local database credentials in your private configuration file or environment variables. Do not commit real passwords or other secrets to GitHub.
-
-The application supports the following environment-variable overrides:
-
-- `NETROUTE_DB_URL`
-- `NETROUTE_DB_USER`
-- `NETROUTE_DB_PASSWORD`
-
-Refer to the project's configuration implementation for the exact connection URL, timeout settings, and schema initialization procedure.
-
-## Build and Run
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/DJKnight-Nishanth/NetRoute.git
-cd NetRoute
-```
-
-### 2. Compile the application
-
-On Windows PowerShell:
-
-```powershell
-.\mvnw.cmd compile
-```
-
-On Linux or macOS:
-
-```bash
-./mvnw compile
-```
-
-### 3. Run the tests
-
-On Windows:
-
-```powershell
-.\mvnw.cmd test
-```
-
-On Linux or macOS:
-
-```bash
-./mvnw test
-```
-
-### 4. Launch the application
-
-After compiling, launch the main class with the required runtime dependencies available.
-
-For the existing Windows setup, the following command may be used if the MySQL Connector/J JAR is present at the specified path:
-
-```powershell
-java -cp "target\classes;C:\Users\<YOUR_WINDOWS_USERNAME>\.m2\repository\com\mysql\mysql-connector-j\9.1.0\mysql-connector-j-9.1.0.jar" com.netroute.Main
-```
-
-Replace the username and JAR path with the actual values on your system.
-
-If the dependency version or path differs, update the command accordingly. Configure the database before using database-dependent features.
-
-## Using NetRoute
-
-1. Launch the application.
-2. Inspect the initial network topology.
-3. Add, remove, or modify nodes and links as required.
-4. Configure link costs or randomize them to experiment with different network conditions.
-5. Calculate routes between nodes.
-6. Send packets and run the simulation.
-7. Advance the simulation one tick at a time to inspect its progress.
-8. Simulate a link failure and observe whether an alternative route is available.
-9. Restore failed links and examine the resulting network state.
-10. Review the displayed statistics.
-11. Save a topology and revisit it through topology history.
-12. Inspect saved simulation runs through simulation history.
-
-Available actions may depend on the current network state and whether the database connection is configured correctly.
-
-## Testing
-
-The project includes automated tests for supported application components.
-
-Testing should cover:
-
-- Network node and link operations.
-- Graph connectivity and topology changes.
-- Shortest-path calculations.
-- Packet simulation behavior.
-- Link failure and restoration.
-- Statistics calculations.
-- Database persistence and retrieval.
-- Topology and simulation history operations.
-- Invalid inputs and boundary cases.
-
-Run the test suite using:
-
-```powershell
-.\mvnw.cmd test
-```
-
-Record the actual test results from the latest test execution when preparing a project report or academic submission.
-
-## Learning Outcomes
-
-This project demonstrates the practical application of:
-
-- Object-oriented programming concepts in Java.
-- Graph representations and graph traversal concepts.
-- Shortest-path algorithms.
-- Priority queues and related data structures.
-- Discrete-step simulation.
-- Dynamic network failure and recovery handling.
-- Database design and JDBC integration.
-- Modular software architecture.
-- Automated testing and version control.
-
-## Future Enhancements
-
-Possible future improvements include:
-
-- Additional routing algorithms such as Bellman–Ford.
-- More detailed packet queues and congestion models.
-- Advanced performance analytics.
-- Comparisons between multiple simulation runs.
-- Exportable reports and topology diagrams.
-- More realistic network delay and packet-loss models.
-
-These are potential extensions rather than claims about currently implemented functionality.
-
-## Academic Information
-
-**Project:** NetRoute — Network Traffic & Routing Simulator
-
-**Subject:** Introduction to Object Oriented Programming
-
-**Course Code:** CSL 202
-
-**Institution:** Indian Institute of Information Technology
-
-**Repository:** [DJKnight-Nishanth/NetRoute](https://github.com/DJKnight-Nishanth/NetRoute)
+Originally built as a Java Swing desktop application, **NetRoute Web** provides a modern, responsive browser-based web edition powered by a lightweight Java 21 backend (`com.sun.net.httpserver.HttpServer` with Virtual Threads) and an interactive HTML5 Canvas visualizer, without using heavy frameworks like Spring Boot, React, or Angular.
 
 ---
 
-*NetRoute is an academic project developed to demonstrate object-oriented programming, graph algorithms, network simulation, and database integration.*
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture & Technology Stack](#architecture--technology-stack)
+- [Project Structure](#project-structure)
+- [How Routing Works](#how-routing-works)
+- [Discrete-Event Simulation Engine](#discrete-event-simulation-engine)
+- [Database Design & Retention Policy](#database-design--retention-policy)
+- [Prerequisites](#prerequisites)
+- [Database Setup](#database-setup)
+- [Build and Run](#build-and-run)
+  - [Running the Web Application (Default)](#running-the-web-application-default)
+  - [Running the Original Desktop Application](#running-the-original-desktop-application)
+- [REST API Specification](#rest-api-specification)
+- [Testing & Verification](#testing--verification)
+- [Academic Information](#academic-information)
+- [License](#license)
+
+---
+
+## Overview
+
+Computer networks rely on efficient routing protocols and resilient topologies to maintain reliable data flow during outages and network congestion. NetRoute bridges theoretical network algorithms and practical experimentation by combining:
+
+1. **Shortest-Path Pathfinding**: Minimum-cost route discovery via Dijkstra's algorithm on weighted adjacency lists with deterministic tie-breaking.
+2. **Discrete-Event Simulation**: Deterministic tick-based packet transit modeling FIFO queuing, hop delays, and link capacities.
+3. **Resilience & Dynamic Fault Recovery**: Automatic rerouting of live in-flight packets when links fail, and packet drop tracking when no alternative route exists.
+4. **Relational Persistence**: Transactional MySQL persistence with unified atomic saves for topologies and simulation run analytics.
+5. **Dual Presentation Modes**:
+   - **Web Application**: Accessible via any modern web browser at `http://localhost:8080` with an interactive HTML5 Canvas, responsive controls, and real-time telemetry.
+   - **Desktop Application**: The original Java Swing / Java2D desktop client remains 100% intact and functional.
+
+---
+
+## Key Features
+
+### 1. Interactive Network Visualization
+- HTML5 Canvas visualizer with support for high-DPI (Retina) displays.
+- Visually distinct node types: Computers (tech blue), Routers (teal), Servers (purple).
+- Links with weight, delay, and capacity badges.
+- Active Dijkstra routes highlighted with an electric cyan glow.
+- Failed links rendered with distinct red dashed patterns and warning badges.
+- Smooth mouse drag-and-drop repositioning of nodes, pan, and zoom controls (0.4x - 2.5x).
+- Real-time animated packet particles traveling along active hops during simulation ticks.
+
+### 2. Algorithmic Routing (Dijkstra)
+- Evaluates shortest paths strictly based on routing costs.
+- Automatically ignores inactive/failed links.
+- Uses `PriorityQueue` min-heaps with deterministic secondary tie-breaking on node IDs and link IDs.
+
+### 3. Discrete-Event Packet Simulator
+- Integer tick-based clock without wall-clock sleeps or socket overhead.
+- FIFO packet queues per link with capacity constraints ($\max$ packets dispatched per tick).
+- Step-by-step tick advancement or "Run to Idle" execution.
+- Tracking across full packet lifecycles (`CREATED` $\to$ `QUEUED` $\to$ `IN_TRANSIT` $\to$ `DELIVERED` / `FAILED` / `DROPPED`).
+
+### 4. Dynamic Fault Recovery & Resilience
+- Instant link severance (`failLink`) and restoration (`restoreLink`).
+- In-transit packets affected by link failure are immediately rerouted from their current vertex using Dijkstra.
+- Packets are dropped if no alternative path exists to the destination.
+- Semantics: The failures metric accurately reflects the number of currently inactive links at any point in time.
+
+### 5. Topology & Analytics Persistence
+- Save custom topologies to MySQL `netroute_db`.
+- Load saved topologies and reconstruct live network graphs in memory.
+- Unified atomic saves: Save topology updates and simulation run metrics in a single database transaction.
+- Browse, filter, and inspect historical simulation run experiments.
+
+---
+
+## Architecture & Technology Stack
+
+```text
++---------------------------------------------------------------------------------+
+|                          FRONTEND (Browser Client)                              |
+|   HTML5  |  CSS3 (Slate Dark Theme #0B1118)  |  Vanilla ES6 JavaScript          |
+|   - Interactive HTML5 Canvas visualizer (pan, zoom, node drag, packet anim)     |
+|   - Real-time Telemetry Dashboard (delivery ratio, delay ticks, reroutes)       |
+|   - Navigation Views: Simulator, Saved Topologies, History, Tech Stack, About   |
++----------------------------------------+----------------------------------------+
+                                         |  HTTP / REST (JSON)
+                                         v
++---------------------------------------------------------------------------------+
+|                        BACKEND (Java 21 Web Server)                             |
+|   com.sun.net.httpserver.HttpServer  |  Java 21 Virtual Threads  |  Google Gson |
+|   - StaticFileHandler: Serves frontend assets securely with MIME types          |
+|   - NetworkHandler: Topology mutations, node positioning, link management       |
+|   - RoutingHandler: Dijkstra route calculations                                 |
+|   - SimulationHandler: Packet submission, tick stepping, link failure/restore   |
+|   - StatisticsHandler: Real-time telemetry calculations                         |
+|   - HistoryHandler: Topologies and simulation runs CRUD with MySQL              |
++----------------------------------------+----------------------------------------+
+                                         |  Calls Existing Services
+                                         v
++---------------------------------------------------------------------------------+
+|                     REUSED CORE BUSINESS LOGIC (100% Pure Java)                 |
+|   - com.netroute.graph.Network & GraphManager                                   |
+|   - com.netroute.routing.DijkstraRouter                                         |
+|   - com.netroute.simulation.SimulationEngine & PacketQueue                      |
+|   - com.netroute.statistics.NetworkStatistics                                  |
+|   - com.netroute.service.TopologyStorageService                                 |
+|   - com.netroute.repository.* (JDBC Repositories)                              |
++----------------------------------------+----------------------------------------+
+                                         |  JDBC (MySQL Connector/J 9.1.0)
+                                         v
++---------------------------------------------------------------------------------+
+|                           MySQL DATABASE (netroute_db)                          |
+|   topologies  |  topology_nodes  |  topology_links  |  simulation_runs          |
++---------------------------------------------------------------------------------+
+```
+
+### Technology Breakdown
+
+| Component | Technology | Purpose |
+|---|---|---|
+| **Language** | Java 21 | Core algorithms, data structures, and web server |
+| **Concurrency** | Virtual Threads | High-throughput concurrent HTTP request handling |
+| **Web Server** | JDK `HttpServer` | Built-in zero-dependency HTTP server (port 8080) |
+| **Serialization**| Google Gson 2.11.0 | Fast, standard JSON serialization |
+| **Frontend UI** | HTML5, CSS3, Vanilla JS | Clean Single-Page Application (no React/Vue) |
+| **Visualization**| HTML5 Canvas 2D | Responsive technical network graph visualizer |
+| **Database** | MySQL 8.0+ / 9.0+ | Persistent storage for topologies and history |
+| **Connectivity**| JDBC (MySQL Connector/J)| Type-safe relational communication and transactions |
+| **Build & Test**| Maven Wrapper & JUnit 5 | Build automation and unit/integration testing |
+
+---
+
+## Project Structure
+
+```text
+D:\NetRoute-Web/
+├── .mvn/wrapper/                     # Maven wrapper
+├── database-schema.sql               # MySQL relational schema DDL
+├── db.properties.example             # Database configuration template
+├── pom.xml                           # Project Object Model
+├── README.md                         # Documentation
+├── src/
+│   ├── main/
+│   │   ├── java/com/netroute/
+│   │   │   ├── Main.java             # Desktop Swing launcher
+│   │   │   ├── model/                # Nodes, Links, Packets, Routes
+│   │   │   ├── graph/                # Network adjacency list & GraphManager
+│   │   │   ├── routing/              # DijkstraRouter implementation
+│   │   │   ├── simulation/           # SimulationEngine & PacketQueue
+│   │   │   ├── statistics/           # NetworkStatistics calculations
+│   │   │   ├── repository/           # JDBC DAOs & DatabaseConnection
+│   │   │   ├── service/              # TopologyStorageService application façade
+│   │   │   ├── ui/                   # Original Swing components (untouched)
+│   │   │   └── web/                  # Web Server & REST API Handlers
+│   │   │       ├── WebMain.java      # Web application entry point
+│   │   │       ├── WebServer.java    # Embedded HTTP server setup
+│   │   │       ├── WebApplicationState.java # Centralized thread-safe state
+│   │   │       ├── StaticFileHandler.java   # Secure asset server
+│   │   │       ├── HttpUtils.java    # HTTP & JSON utility methods
+│   │   │       ├── dto/              # JSON data transfer records
+│   │   │       └── handler/          # REST API route handlers
+│   │   └── resources/
+│   │       └── static/               # Frontend assets
+│   │           ├── index.html        # Main HTML dashboard
+│   │           ├── css/style.css     # Slate dark styling
+│   │           └── js/
+│   │               ├── api.js        # REST API client
+│   │               ├── canvas.js     # HTML5 Canvas visualizer
+│   │               └── app.js        # View controller & event wiring
+│   └── test/
+│       └── java/com/netroute/        # 152 unit & integration tests
+```
+
+---
+
+## How Routing Works
+
+1. Nodes maintain outgoing edges in an adjacency list.
+2. Inactive links (`isActive() == false`) are ignored during candidate traversal.
+3. Candidate distances are maintained in a min-heap priority queue ordered by accumulated routing cost.
+4. Equal-cost paths use deterministic tie-breaking:
+   - Prefer lower alphabetical node ID.
+   - If still tied, prefer lower alphabetical link ID.
+5. Reconstructs an immutable `Route` object with nodes, links, and total cost.
+
+---
+
+## Discrete-Event Simulation Engine
+
+- Time advances in discrete integer ticks ($t = 0, 1, 2, \dots$).
+- When a packet is submitted, an initial Dijkstra route is assigned.
+- At each tick:
+  1. **Complete Arrivals**: Checks in-flight transmissions where `arrivalTick <= time`. If destination is reached, packet is marked `DELIVERED`. Otherwise, enqueues to next link.
+  2. **Start Transmissions**: For each link, polls queued packets up to the link's `capacity` and computes hop duration:
+     $$\text{duration} = \max(1, \lceil \text{link.getDelay()} \rceil) \text{ ticks}$$
+- **Link Failure**: When `failLink` is invoked:
+  - Affected live packets are halted and rerouted via Dijkstra from their current vertex.
+  - If no path exists, status transitions to `DROPPED`.
+
+---
+
+## Database Design & Retention Policy
+
+NetRoute connects to MySQL database `netroute_db`:
+
+1. `topologies`: Header record for saved topologies with unique name constraint.
+2. `topology_nodes`: Vertices with canvas coordinates `(pos_x, pos_y)`. Cascades on topology deletion.
+3. `topology_links`: Weighted edges with cost, delay, capacity, active state. Cascades on topology deletion.
+4. `simulation_runs`: Historical execution analytics.
+   - **Retention Policy**: `topology_id` is foreign-keyed with `ON DELETE SET NULL`, while `topology_name` is stored denormalized. Deleting a saved topology will **never erase** historical simulation analytics.
+
+---
+
+## Prerequisites
+
+- **Java Development Kit (JDK) 21** or higher.
+- **MySQL Server 8.0+ / 9.0+** (optional for in-memory simulation; required for database persistence).
+- A modern web browser (Chrome, Edge, Firefox, Safari).
+
+---
+
+## Database Setup
+
+1. Start MySQL Server.
+2. Create the database:
+   ```sql
+   CREATE DATABASE netroute_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   ```
+3. Initialize the schema using the provided DDL:
+   ```bash
+   mysql -u root -p netroute_db < database-schema.sql
+   ```
+4. Copy `db.properties.example` to `db.properties` in the project root and add your MySQL credentials:
+   ```properties
+   db.url=jdbc:mysql://localhost:3306/netroute_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=UTF-8
+   db.user=root
+   db.password=your_password_here
+   db.timeout=5
+   ```
+   *(Alternatively, set environment variables `NETROUTE_DB_URL`, `NETROUTE_DB_USER`, `NETROUTE_DB_PASSWORD`).*
+
+---
+
+## Build and Run
+
+### Running the Web Application (Default)
+
+Compile and launch NetRoute Web using the Maven Wrapper:
+
+```bash
+.\mvnw.cmd compile exec:java
+```
+
+Or run via Java directly:
+```bash
+.\mvnw.cmd compile
+java -cp "target/classes;target/dependency/*" com.netroute.web.WebMain
+```
+
+Once started, open your web browser and navigate to:
+
+👉 **`http://localhost:8080`**
+
+### Running the Original Desktop Application
+
+The original Java Swing desktop interface remains completely intact and can be launched at any time:
+
+```bash
+.\mvnw.cmd compile exec:java -Dexec.mainClass="com.netroute.Main"
+```
+
+---
+
+## REST API Specification
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/network` | `GET` | Snapshot of all nodes, links, and project metadata |
+| `/api/network/reset` | `POST` | Reset in-memory graph to default 6-node campus network |
+| `/api/network/new-project` | `POST` | Clear canvas for a new blank topology project |
+| `/api/network/randomize-costs` | `POST` | Randomize all link costs between 1 and 10 |
+| `/api/network/node` | `POST` | Add node (`COMPUTER`, `ROUTER`, `SERVER`) |
+| `/api/network/node` | `DELETE`| Remove node and its incident links by `?id=` |
+| `/api/network/node/position` | `POST` | Update node coordinates `(x, y)` |
+| `/api/network/link` | `POST` | Connect two nodes with cost, delay, and capacity |
+| `/api/network/link` | `DELETE`| Delete link by `?id=` |
+| `/api/route` | `POST` | Calculate Dijkstra route `{sourceId, destinationId}` |
+| `/api/simulation/state` | `GET` | Get simulation clock, active packets, and queue sizes |
+| `/api/simulation/packet` | `POST` | Submit packet `{sourceId, destinationId, payloadSize}` |
+| `/api/simulation/step` | `POST` | Advance simulation by 1 tick |
+| `/api/simulation/run` | `POST` | Run simulation loop until all packets are idle |
+| `/api/simulation/reset` | `POST` | Reset simulation engine for current network |
+| `/api/simulation/fail-link` | `POST` | Mark link inactive, triggering live packet rerouting |
+| `/api/simulation/restore-link`| `POST`| Restore failed link to active operational status |
+| `/api/statistics` | `GET` | Current network and packet delivery statistics |
+| `/api/history/topologies` | `GET` | List saved topologies from MySQL |
+| `/api/history/topologies/save`| `POST`| Atomically persist topology and optional simulation run |
+| `/api/history/topologies/load`| `POST`| Load topology by ID into the active simulation |
+| `/api/history/topologies` | `DELETE`| Delete or archive saved topology by `?id=` |
+| `/api/history/runs` | `GET` | List historical simulation run analytics |
+| `/api/db/status` | `GET` | Health check of MySQL connection and response times |
+
+---
+
+## Testing & Verification
+
+Run the full automated test suite:
+
+```bash
+.\mvnw.cmd test -B
+```
+
+### Test Suite Summary
+- **152 Total Tests** across 24 test classes.
+- **150 Tests Passing**, **2 Skipped** (live database integration tests only execute when a local MySQL instance is reachable).
+- 100% of core algorithmic, simulation, routing, repository, and web REST API tests pass cleanly with 0 failures or errors.
+
+---
+
+## Academic Information
+
+- **Subject:** Introduction to Object Oriented Programming
+- **Course Code:** CSL 202
+- **Institution:** Indian Institute of Information Technology
+- **Project Name:** NetRoute — Network Traffic & Routing Simulator
+- **Tagline:** *Every Node Has a Path. Every Packet Has a Purpose.*
+
+---
+
+## License
+
+This project is licensed under the MIT License.
