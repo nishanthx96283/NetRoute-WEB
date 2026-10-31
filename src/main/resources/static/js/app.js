@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cardFeatPersistence: document.getElementById('cardFeatPersistence'),
 
         // Database status
+        dbStatusBadge: document.getElementById('dbStatusBadge'),
         dbStatusDot: document.getElementById('dbStatusDot'),
         dbStatusText: document.getElementById('dbStatusText'),
 
@@ -263,16 +264,21 @@ document.addEventListener('DOMContentLoaded', () => {
     async function checkDatabaseStatus() {
         try {
             const status = await API.getDbStatus();
-            if (status.available) {
+            if (status && status.available) {
                 elements.dbStatusDot.className = 'status-dot online';
                 elements.dbStatusText.textContent = 'MySQL Connected';
-                elements.dbStatusBadge.title = `${status.databaseProduct} ${status.databaseVersion} (${status.responseTimeMs}ms)`;
+                if (elements.dbStatusBadge) {
+                    elements.dbStatusBadge.title = `${status.databaseProduct} ${status.databaseVersion} (${status.responseTimeMs}ms)`;
+                }
             } else {
                 elements.dbStatusDot.className = 'status-dot';
                 elements.dbStatusText.textContent = 'MySQL Offline';
-                elements.dbStatusBadge.title = status.message;
+                if (elements.dbStatusBadge) {
+                    elements.dbStatusBadge.title = status ? status.message : 'Database unavailable';
+                }
             }
         } catch (e) {
+            console.error('Database status check error:', e);
             elements.dbStatusDot.className = 'status-dot';
             elements.dbStatusText.textContent = 'DB Check Failed';
         }
