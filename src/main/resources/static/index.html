@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetRoute — Network Traffic & Routing Simulator</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- TOP NAVIGATION BAR -->
+    <header class="navbar">
+        <div class="brand" id="brandBtn">
+            <div class="brand-logo">NR</div>
+            <div class="brand-text">
+                <h1>NetRoute</h1>
+                <span>Network Simulator</span>
+            </div>
+        </div>
+
+        <nav class="nav-links">
+            <button class="nav-btn active" id="navSimulator">⚡ Simulator</button>
+            <button class="nav-btn" id="navTopologies">📁 Saved Topologies</button>
+            <button class="nav-btn" id="navHistory">📊 Simulation History</button>
+            <button class="nav-btn" id="navTech">⚙️ Tech Stack</button>
+            <button class="nav-btn" id="navAbout">ℹ️ About</button>
+        </nav>
+
+        <div class="nav-status">
+            <div class="db-badge" id="dbStatusBadge" title="MySQL Database Status">
+                <span class="status-dot" id="dbStatusDot"></span>
+                <span id="dbStatusText">Checking DB...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN VIEW CONTAINER -->
+    <main class="view-container">
+
+        <!-- ========================================== -->
+        <!-- VIEW 1: LANDING PAGE -->
+        <!-- ========================================== -->
+        <section class="view" id="landingView">
+            <div class="landing-content">
+                <div class="hero-section">
+                    <div class="hero-tagline">Network Traffic & Routing Simulator</div>
+                    <h1 class="hero-title">Every Node Has a Path.<br>Every Packet Has a Purpose.</h1>
+                    <p class="hero-subtitle">
+                        An interactive environment to model computer networks, calculate optimal shortest-path routes with Dijkstra's algorithm, simulate discrete-event packet delivery, and evaluate network resilience under link failures.
+                    </p>
+                    <div class="hero-actions">
+                        <button class="btn-primary" id="btnHeroLaunch">Launch Simulator →</button>
+                        <button class="btn-secondary" id="btnHeroTopologies">Browse Topologies</button>
+                        <button class="btn-secondary" id="btnHeroHistory">View Run History</button>
+                    </div>
+                </div>
+
+                <div class="feature-grid">
+                    <div class="feature-card" id="cardFeatRouting">
+                        <div class="feature-icon">🧭</div>
+                        <h3>Shortest-Path Routing</h3>
+                        <p>Calculate optimal paths using Dijkstra's algorithm over weighted adjacency lists with deterministic tie-breaking.</p>
+                    </div>
+
+                    <div class="feature-card" id="cardFeatSimulation">
+                        <div class="feature-icon">📦</div>
+                        <h3>Discrete-Event Simulation</h3>
+                        <p>Observe FIFO link queuing, link throughput limits, hop delays, and simulated packet transit across network hops.</p>
+                    </div>
+
+                    <div class="feature-card" id="cardFeatFailures">
+                        <div class="feature-icon">⚠️</div>
+                        <h3>Failure & Dynamic Rerouting</h3>
+                        <p>Simulate link severing and restoration; live in-flight packets automatically reroute or drop if no path exists.</p>
+                    </div>
+
+                    <div class="feature-card" id="cardFeatPersistence">
+                        <div class="feature-icon">💾</div>
+                        <h3>MySQL Data Persistence</h3>
+                        <p>Persist custom network topologies and historical simulation analytics atomically into MySQL database.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- VIEW 2: SIMULATOR WORKSPACE -->
+        <!-- ========================================== -->
+        <section class="view active" id="simulatorView">
+            <div class="simulator-layout">
+
+                <!-- LEFT SIDEBAR: CONTROL PANEL -->
+                <aside class="left-sidebar">
+
+                    <!-- Section 1: Shortest Path Routing -->
+                    <div class="panel-section">
+                        <div class="panel-title">
+                            <span>🧭 Shortest-Path Routing</span>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label class="form-label">Source Node</label>
+                                <select class="form-select" id="selSourceNode"></select>
+                            </div>
+                            <div class="form-group" style="flex: 1;">
+                                <label class="form-label">Destination Node</label>
+                                <select class="form-select" id="selDestNode"></select>
+                            </div>
+                        </div>
+                        <button class="btn-block btn-cyan" id="btnCalculateRoute">Calculate Route (Dijkstra)</button>
+                        <div class="route-result-box" id="routeResultBox">
+                            <span>No route calculated yet.</span>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Link Failure & Resilience -->
+                    <div class="panel-section">
+                        <div class="panel-title">
+                            <span>⚡ Failure & Resilience</span>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Target Link</label>
+                            <select class="form-select" id="selTargetLink"></select>
+                        </div>
+                        <div class="form-row">
+                            <button class="btn-block btn-red" id="btnFailLink">Simulate Failure</button>
+                            <button class="btn-block btn-outline" id="btnRestoreLink">Restore Link</button>
+                        </div>
+                        <div style="margin-top: 8px;">
+                            <button class="btn-block btn-outline" id="btnRandomizeCosts">🎲 Randomize Link Costs (1-10)</button>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Dynamic Network Management -->
+                    <div class="panel-section">
+                        <div class="panel-title">
+                            <span>🛠️ Network Management</span>
+                        </div>
+                        <!-- Add Node -->
+                        <div class="form-row" style="margin-bottom: 8px;">
+                            <select class="form-select" id="selAddNodeType" style="flex: 1;">
+                                <option value="COMPUTER">Computer</option>
+                                <option value="ROUTER">Router</option>
+                                <option value="SERVER">Server</option>
+                            </select>
+                            <button class="btn-block btn-outline" id="btnAddNode" style="flex: 1;">+ Add Node</button>
+                        </div>
+
+                        <!-- Connect Nodes -->
+                        <div class="form-group">
+                            <label class="form-label">Connect Nodes</label>
+                            <div class="form-row">
+                                <select class="form-select" id="selConnectNodeA" style="flex: 1;"></select>
+                                <select class="form-select" id="selConnectNodeB" style="flex: 1;"></select>
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-bottom: 8px;">
+                            <div style="flex: 1;">
+                                <label class="form-label">Cost</label>
+                                <input type="number" class="form-input" id="txtLinkCost" value="2.0" step="0.5" min="0.1">
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="form-label">Delay (t)</label>
+                                <input type="number" class="form-input" id="txtLinkDelay" value="2.0" step="1" min="1">
+                            </div>
+                            <div style="flex: 1;">
+                                <label class="form-label">Cap</label>
+                                <input type="number" class="form-input" id="txtLinkCapacity" value="4" step="1" min="1">
+                            </div>
+                        </div>
+                        <button class="btn-block btn-outline" id="btnConnectNodes" style="margin-bottom: 12px;">Connect Link</button>
+
+                        <!-- Delete Controls -->
+                        <div class="form-row">
+                            <button class="btn-block btn-outline" id="btnDeleteSelectedNode" style="font-size: 11px;">Delete Node</button>
+                            <button class="btn-block btn-outline" id="btnDeleteSelectedLink" style="font-size: 11px;">Delete Link</button>
+                        </div>
+                    </div>
+
+                    <!-- Section 4: Packet Simulation -->
+                    <div class="panel-section">
+                        <div class="panel-title">
+                            <span>📦 Packet Simulation</span>
+                        </div>
+                        <div class="form-row" style="margin-bottom: 8px;">
+                            <button class="btn-block btn-blue" id="btnSendPacket">Send Packet</button>
+                            <button class="btn-block btn-outline" id="btnStepSimulation">Step (1 Tick)</button>
+                        </div>
+                        <div class="form-row">
+                            <button class="btn-block btn-outline" id="btnRunSimulation">Run to Idle</button>
+                            <button class="btn-block btn-outline" id="btnResetSimulation">Reset Engine</button>
+                        </div>
+                    </div>
+
+                </aside>
+
+                <!-- CENTER: CANVAS WORKSPACE -->
+                <main class="workspace-center">
+                    <div class="workspace-bar">
+                        <div class="project-meta">
+                            <div class="project-name-badge">
+                                <span>🌐</span>
+                                <span id="lblProjectName">Sample Campus Network</span>
+                            </div>
+                            <span class="modified-badge" id="badgeModified" style="display: none;">MODIFIED</span>
+                        </div>
+                        <div class="workspace-actions">
+                            <button class="btn-sm" id="btnNewProject">New Project</button>
+                            <button class="btn-sm primary" id="btnSaveProject">💾 Save Topology & Run</button>
+                            <button class="btn-sm" id="btnResetCampusNetwork">Reset Network</button>
+                        </div>
+                    </div>
+
+                    <div class="canvas-wrapper">
+                        <canvas id="networkCanvas"></canvas>
+
+                        <!-- Floating Canvas Controls -->
+                        <div class="canvas-controls">
+                            <button class="control-icon-btn" id="btnZoomIn" title="Zoom In">+</button>
+                            <button class="control-icon-btn" id="btnZoomOut" title="Zoom Out">−</button>
+                            <button class="control-icon-btn" id="btnResetZoom" title="Reset View">⤢</button>
+                        </div>
+
+                        <!-- Floating Legend -->
+                        <div class="canvas-legend">
+                            <div class="legend-item"><span class="legend-badge" style="background: #3B9AEE;"></span> Computer</div>
+                            <div class="legend-item"><span class="legend-badge" style="background: #2EC4B6;"></span> Router</div>
+                            <div class="legend-item"><span class="legend-badge" style="background: #9E7AD2;"></span> Server</div>
+                            <div class="legend-item"><span class="legend-badge" style="background: #43C6D9;"></span> Active Route</div>
+                            <div class="legend-item"><span class="legend-badge" style="background: #E65A5A;"></span> Failed Link</div>
+                        </div>
+                    </div>
+                </main>
+
+                <!-- RIGHT SIDEBAR: METRICS & EVENT LOG -->
+                <aside class="right-sidebar">
+
+                    <!-- Section 1: Traffic & Delivery -->
+                    <div class="panel-section">
+                        <div class="panel-title">
+                            <span>TRAFFIC & PACKET DELIVERY</span>
+                        </div>
+                        <div class="metrics-grid">
+                            <div class="metric-tile">
+                                <div class="metric-label">Total Packets</div>
+                                <div class="metric-val" id="valTotalPackets">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Delivered</div>
+                                <div class="metric-val" id="valDelivered" style="color: var(--status-success);">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Failed at Submit</div>
+                                <div class="metric-val" id="valFailed" style="color: var(--status-error);">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Dropped in Transit</div>
+                                <div class="metric-val" id="valDropped" style="color: var(--status-error);">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Delivery Ratio</div>
+                                <div class="metric-val" id="valDeliveryRatio" style="color: var(--accent-cyan);">0.0%</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Avg Delay</div>
+                                <div class="metric-val" id="valAvgDelay" style="color: var(--accent-blue);">0.00t</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Topology & Resilience -->
+                    <div class="panel-section">
+                        <div class="panel-title">
+                            <span>TOPOLOGY & RESILIENCE</span>
+                        </div>
+                        <div class="metrics-grid">
+                            <div class="metric-tile">
+                                <div class="metric-label">Total Nodes</div>
+                                <div class="metric-val" id="valTotalNodes">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Total Links</div>
+                                <div class="metric-val" id="valTotalLinks">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Active Links</div>
+                                <div class="metric-val" id="valActiveLinks" style="color: var(--status-success);">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Inactive / Failed</div>
+                                <div class="metric-val" id="valInactiveLinks" style="color: var(--status-error);">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Failure Events</div>
+                                <div class="metric-val" id="valFailureEvents" style="color: var(--status-warning);">0</div>
+                            </div>
+                            <div class="metric-tile">
+                                <div class="metric-label">Reroutes</div>
+                                <div class="metric-val" id="valReroutes" style="color: var(--accent-cyan);">0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Event Log Terminal -->
+                    <div class="terminal-container">
+                        <div class="terminal-header">
+                            <span class="panel-title" style="margin: 0;">SIMULATION EVENT LOG</span>
+                            <button class="btn-sm" id="btnClearLog" style="padding: 2px 8px; font-size: 10px;">Clear</button>
+                        </div>
+                        <div class="terminal-box" id="terminalBox"></div>
+                    </div>
+
+                </aside>
+
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- VIEW 3: SAVED TOPOLOGIES PAGE -->
+        <!-- ========================================== -->
+        <section class="view" id="topologiesView">
+            <div class="page-container">
+                <div class="page-header">
+                    <div>
+                        <h2>Saved Network Topologies</h2>
+                        <p style="color: var(--text-secondary); font-size: 13px;">Manage configurations persisted in MySQL netroute_db.</p>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" class="search-box" id="txtSearchTopologies" placeholder="Search topologies by name...">
+                        <button class="btn-sm primary" id="btnOpenSaveModal">+ Save Current Topology</button>
+                    </div>
+                </div>
+
+                <div class="topologies-grid" id="topologiesGrid">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- VIEW 4: SIMULATION HISTORY PAGE -->
+        <!-- ========================================== -->
+        <section class="view" id="historyView">
+            <div class="page-container">
+                <div class="page-header">
+                    <div>
+                        <h2>Simulation History Analytics</h2>
+                        <p style="color: var(--text-secondary); font-size: 13px;">Performance and packet delivery metrics across simulation experiments.</p>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" class="search-box" id="txtSearchRuns" placeholder="Filter by topology or run ID...">
+                        <button class="btn-sm" id="btnRefreshRuns">🔄 Refresh</button>
+                    </div>
+                </div>
+
+                <div class="table-card">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Run ID</th>
+                                <th>Topology</th>
+                                <th>Date & Time</th>
+                                <th>Ticks</th>
+                                <th>Packets</th>
+                                <th>Delivered</th>
+                                <th>Failed</th>
+                                <th>Dropped</th>
+                                <th>Delivery %</th>
+                                <th>Avg Delay</th>
+                                <th>Failures</th>
+                                <th>Reroutes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="runsTableBody">
+                            <!-- Populated dynamically via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- VIEW 5: TECH STACK PAGE -->
+        <!-- ========================================== -->
+        <section class="view" id="techView">
+            <div class="page-container">
+                <div class="page-header">
+                    <div>
+                        <h2>Technology Stack & Architecture</h2>
+                        <p style="color: var(--text-secondary); font-size: 13px;">Engineering specifications powering NetRoute Web.</p>
+                    </div>
+                </div>
+
+                <div class="doc-card">
+                    <h3>Backend: Java 21 & Lightweight HTTP Server</h3>
+                    <p>Powered by JDK 21's built-in <code>com.sun.net.httpserver.HttpServer</code> configured with Java 21 Virtual Threads (<code>Executors.newVirtualThreadPerTaskExecutor()</code>) for ultra-lightweight, high-concurrency request handling without the footprint of heavy frameworks.</p>
+                    <p>JSON serialization and deserialization are handled strictly by Google Gson 2.11.0, preserving complete separation between domain models and HTTP transport envelopes.</p>
+                </div>
+
+                <div class="doc-card">
+                    <h3>Algorithms: Shortest-Path & Discrete-Event Simulation</h3>
+                    <p><strong>Dijkstra's Algorithm:</strong> Implemented in <code>com.netroute.routing.DijkstraRouter</code> using <code>java.util.PriorityQueue</code> as a binary min-heap over adjacency lists. Guarantees deterministic path selection using secondary tie-breaking on node IDs and link IDs.</p>
+                    <p><strong>Discrete-Event Engine:</strong> Time is tracked as a discrete integer tick counter in <code>com.netroute.simulation.SimulationEngine</code>. Links enforce FIFO packet queuing and capacity thresholds ($\max$ packets starting per tick). Failed links trigger dynamic Dijkstra rerouting from the packet's current vertex.</p>
+                </div>
+
+                <div class="doc-card">
+                    <h3>Database: MySQL & Atomic JDBC Transactions</h3>
+                    <p>Relational persistence in <code>netroute_db</code> using MySQL Connector/J 9.1.0. Unified save operations coordinate topology updates and simulation run metrics in a single atomic database transaction with explicit rollback on error.</p>
+                    <p>Retention Policy: Historical simulation runs retain denormalized topology names with <code>ON DELETE SET NULL</code>, ensuring experiment analytics remain permanently accessible even after topologies are deleted.</p>
+                </div>
+
+                <div class="doc-card">
+                    <h3>Frontend: HTML5 Canvas & Vanilla JavaScript</h3>
+                    <p>Zero external JavaScript frameworks (no React, Vue, or Angular). High-DPI HTML5 Canvas visualizer renders equipment glyphs, glowing cyan active Dijkstra routes, dashed red failure states, and real-time in-flight packet movement particles.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- VIEW 6: ABOUT PAGE -->
+        <!-- ========================================== -->
+        <section class="view" id="aboutView">
+            <div class="page-container">
+                <div class="page-header">
+                    <div>
+                        <h2>About NetRoute Web</h2>
+                        <p style="color: var(--text-secondary); font-size: 13px;">Academic Project Information and System Overview.</p>
+                    </div>
+                </div>
+
+                <div class="doc-card">
+                    <h3>Project Information</h3>
+                    <p><strong>NetRoute — Network Traffic & Routing Simulator</strong></p>
+                    <p><em>Every Node Has a Path. Every Packet Has a Purpose.</em></p>
+
+                    <div class="academic-badge-box">
+                        <h4>Academic Details</h4>
+                        <p><strong>Subject:</strong> Introduction to Object Oriented Programming</p>
+                        <p><strong>Course Code:</strong> CSL 202</p>
+                        <p><strong>Institution:</strong> Indian Institute of Information Technology</p>
+                    </div>
+                </div>
+
+                <div class="doc-card">
+                    <h3>Key Features</h3>
+                    <p>• <strong>Graph Representation:</strong> Models heterogeneous network vertices (Computers, Routers, Servers) and weighted edges with routing costs, simulated delays, and link capacities.</p>
+                    <p>• <strong>Resilient Routing:</strong> Immediate detection of link severance with real-time recalculation of alternative routes from the packet's current location.</p>
+                    <p>• <strong>Zero-Framework Web Migration:</strong> Complete transformation of the original Java Swing desktop interface to a modern browser-based web dashboard while retaining 100% of existing Java business logic.</p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ========================================== -->
+    <!-- MODALS & DIALOGS -->
+    <!-- ========================================== -->
+
+    <!-- Modal 1: Save Topology -->
+    <div class="modal-overlay" id="modalSaveTopology">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>Save Network Topology</h3>
+                <button class="modal-close" data-close="modalSaveTopology">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Topology Name *</label>
+                    <input type="text" class="form-input" id="txtSaveTopoName" placeholder="e.g. Enterprise Core Network">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <input type="text" class="form-input" id="txtSaveTopoDesc" placeholder="e.g. Redundant backbone with dual border routers">
+                </div>
+                <div class="form-group" style="margin-top: 14px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                        <input type="checkbox" id="chkOverwriteIfExists">
+                        <span>Overwrite existing topology if name matches</span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                        <input type="checkbox" id="chkRecordSimulationRun" checked>
+                        <span>Record current simulation run analytics in database</span>
+                    </label>
+                </div>
+                <div class="form-group" id="groupRunNotes">
+                    <label class="form-label">Scenario / Run Notes</label>
+                    <input type="text" class="form-input" id="txtSaveRunNotes" placeholder="e.g. Tested rerouting after core link L4 failure">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-sm" data-close="modalSaveTopology">Cancel</button>
+                <button class="btn-sm primary" id="btnConfirmSave">Save to Database</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 2: Run Details Modal -->
+    <div class="modal-overlay" id="modalRunDetails">
+        <div class="modal-box" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3 id="lblRunModalTitle">Simulation Run Details</h3>
+                <button class="modal-close" data-close="modalRunDetails">&times;</button>
+            </div>
+            <div class="modal-body" id="runDetailsBody">
+                <!-- Dynamically populated -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-sm" data-close="modalRunDetails">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- JavaScript Bundle -->
+    <script src="js/api.js"></script>
+    <script src="js/canvas.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
